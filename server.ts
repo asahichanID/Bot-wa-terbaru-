@@ -1,5 +1,7 @@
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
+import readline from 'readline';
 import { createServer as createViteServer } from 'vite';
 import { BotEngine } from './src/core/BotEngine';
 import { PingPlugin } from './src/plugins/ping';
@@ -12,11 +14,25 @@ import { Logger } from './src/utils/logger';
 import { runAllTests } from './src/tests/bot.test';
 
 const logger = new Logger('Server');
-const PORT = 3000;
+const PORT = parseInt(process.env.PORT || '3000', 10);
+
+// Detect environment: Pterodactyl, container, or production
+const isPterodactyl = !!(
+  process.env.P_SERVER_UUID ||
+  process.env.P_SERVER_LOCATION ||
+  process.cwd().includes('/home/container') ||
+  process.env.HOME === '/home/container' ||
+  process.env.NODE_ENV === 'production'
+);
+
+// Determine initial engine mode: If user explicitly specified WA_ENGINE, respect it.
+// In Pterodactyl or production or when PAIRING_NUMBER is given, default to 'baileys'.
+let currentEngineMode: 'baileys' | 'simulator' =
+  (process.env.WA_ENGINE as 'baileys' | 'simulator') ||
+  (isPterodactyl || process.env.PAIRING_NUMBER ? 'baileys' : 'simulator');
 
 // Shared Bot Instance
 let botInstance: BotEngine | null = null;
-let currentEngineMode: 'baileys' | 'simulator' = (process.env.WA_ENGINE as 'baileys' | 'simulator') || 'simulator';
 
 async function initBot() {
   if (botInstance) return botInstance;
@@ -37,12 +53,72 @@ async function initBot() {
   return botInstance;
 }
 
+// Interactive terminal/console listener for Pterodactyl Console
+function setupConsoleInput(getBot: () => Promise<BotEngine>) {
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: false,
+  });
+
+  rl.on('line', async (line) => {
+    const text = line.trim();
+    if (!text) return;
+
+    // Check if input is a phone number to request pairing code
+    const phoneMatch = text.match(/^(?:pair\s+)?(08\d{7,13}|62\d{8,13}|\+\d{9,15}|\d{9,15})$/i);
+    if (phoneMatch) {
+      let rawNumber = phoneMatch[1].replace(/[^0-9]/g, '');
+      if (rawNumber.startsWith('08')) {
+        rawNumber = '62' + rawNumber.slice(1);
+      }
+      logger.info(`[Console] Memproses permintaan pairing code untuk: ${rawNumber}...`);
+      try {
+        const bot = await getBot();
+        let engine = bot.wa.getEngine();
+        if (!(engine instanceof BaileysEngine)) {
+          logger.info('[Console] Mengaktifkan Baileys Engine untuk koneksi WhatsApp...');
+          currentEngineMode = 'baileys';
+          engine = new BaileysEngine();
+          await bot.wa.switchEngine(engine);
+        }
+        await (engine as BaileysEngine).requestPairingCode(rawNumber);
+      } catch (err: any) {
+        logger.error(`[Console] Gagal meminta pairing code untuk ${rawNumber}:`, err.message || err);
+      }
+      return;
+    }
+
+    if (text.toLowerCase() === 'status') {
+      try {
+        const bot = await getBot();
+        const st = bot.wa.getStatus();
+        logger.info(`[Status] Engine: ${st.engineName} | Koneksi: ${st.state} | JID: ${st.userJid || 'Belum terhubung'}`);
+      } catch (e: any) {
+        logger.error('Gagal mengambil status:', e.message);
+      }
+      return;
+    }
+
+    if (text.toLowerCase() === 'help') {
+      logger.info('──────────────── Perintah Konsol Pterodactyl ────────────────');
+      logger.info('• Ketik nomor HP (misal: 628123456789) -> Meminta Pairing Code WA');
+      logger.info('• status -> Menampilkan status koneksi WhatsApp');
+      logger.info('─────────────────────────────────────────────────────────────');
+      return;
+    }
+  });
+}
+
 async function startServer() {
   const app = express();
   app.use(express.json());
 
   // Initialize bot in background
   const botPromise = initBot();
+
+  // Attach interactive console command prompt for Pterodactyl console
+  setupConsoleInput(() => botPromise);
 
   // API Routes
   app.get('/api/health', (req, res) => {

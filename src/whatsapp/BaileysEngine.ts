@@ -97,14 +97,27 @@ export class BaileysEngine implements IWhatsAppEngine {
         }
       });
 
-      if (!state.creds.registered && config.pairingNumber) {
-        setTimeout(async () => {
-          try {
-            await this.requestPairingCode(config.pairingNumber!);
-          } catch (e) {
-            logger.error('Auto pairing code request failed:', e);
-          }
-        }, 3500);
+      if (!state.creds.registered) {
+        if (config.pairingNumber) {
+          logger.info(`Meminta Pairing Code otomatis untuk nomor ${config.pairingNumber}...`);
+          setTimeout(async () => {
+            try {
+              await this.requestPairingCode(config.pairingNumber!);
+            } catch (e) {
+              logger.error('Gagal meminta pairing code otomatis:', e);
+            }
+          }, 3000);
+        } else {
+          setTimeout(() => {
+            logger.info('─────────────────────────────────────────────────────────────');
+            logger.info('📱 [Baileys] WHATSAPP SIAP DIPAIRING!');
+            logger.info('💡 CARA MENDAPATKAN PAIRING CODE:');
+            logger.info('   1. Ketik nomor HP Anda di konsol ini (contoh: 628123456789 lalu Enter)');
+            logger.info('   ATAU');
+            logger.info('   2. Masukkan PAIRING_NUMBER=628xxxxxx di file .env lalu restart');
+            logger.info('─────────────────────────────────────────────────────────────');
+          }, 1500);
+        }
       }
 
       this.socket.ev.on('messages.upsert', async (upsert: any) => {
@@ -301,9 +314,12 @@ export class BaileysEngine implements IWhatsAppEngine {
     if (!this.socket) {
       throw new Error('Baileys socket is not initialized');
     }
-    const cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
-    if (!cleanNumber) {
-      throw new Error('Invalid phone number for WhatsApp pairing code');
+    let cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
+    if (cleanNumber.startsWith('08')) {
+      cleanNumber = '62' + cleanNumber.slice(1);
+    }
+    if (!cleanNumber || cleanNumber.length < 8) {
+      throw new Error('Nomor telepon tidak valid untuk pairing code WhatsApp (contoh: 628123456789 atau 08123456789)');
     }
 
     try {

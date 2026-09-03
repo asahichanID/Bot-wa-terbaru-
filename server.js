@@ -1,4 +1,5 @@
 // Bridge entry point for hosting panels like Pterodactyl that default to 'node server.js'
+import 'dotenv/config';
 import fs from 'fs';
 import { execSync } from 'child_process';
 import path from 'path';
