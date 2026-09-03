@@ -89,6 +89,40 @@ function setupConsoleInput(getBot: () => Promise<BotEngine>) {
       return;
     }
 
+    if (text.toLowerCase() === 'reset' || text.toLowerCase() === 'logout') {
+      logger.info('─────────────────────────────────────────────────────────────');
+      logger.info('🔄 [Console] Mereset sesi WhatsApp (menghapus folder sesi lama)...');
+      try {
+        const bot = await getBot();
+        const engine = bot.wa.getEngine();
+        if (engine instanceof BaileysEngine) {
+          await engine.disconnect();
+          engine.clearSession();
+          logger.info('✅ [Console] Folder sesi berhasil dibersihkan!');
+          logger.info('🚀 [Console] Membuka koneksi baru... Ketik nomor HP Anda untuk meminta pairing code.');
+          await engine.connect();
+        }
+      } catch (e: any) {
+        logger.error('[Console] Gagal mereset sesi:', e.message || e);
+      }
+      logger.info('─────────────────────────────────────────────────────────────');
+      return;
+    }
+
+    if (text.toLowerCase() === 'reconnect') {
+      logger.info('[Console] Mencoba menghubungkan ulang ke WhatsApp...');
+      try {
+        const bot = await getBot();
+        const engine = bot.wa.getEngine();
+        if (engine instanceof BaileysEngine) {
+          await engine.connect();
+        }
+      } catch (e: any) {
+        logger.error('[Console] Gagal menghubungkan ulang:', e.message || e);
+      }
+      return;
+    }
+
     if (text.toLowerCase() === 'status') {
       try {
         const bot = await getBot();
@@ -104,6 +138,8 @@ function setupConsoleInput(getBot: () => Promise<BotEngine>) {
       logger.info('──────────────── Perintah Konsol Pterodactyl ────────────────');
       logger.info('• Ketik nomor HP (misal: 628123456789) -> Meminta Pairing Code WA');
       logger.info('• status -> Menampilkan status koneksi WhatsApp');
+      logger.info('• reset / logout -> Hapus sesi lama & mulai sesi pairing baru');
+      logger.info('• reconnect -> Hubungkan ulang socket');
       logger.info('─────────────────────────────────────────────────────────────');
       return;
     }

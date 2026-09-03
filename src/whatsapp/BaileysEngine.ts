@@ -30,6 +30,19 @@ export class BaileysEngine implements IWhatsAppEngine {
     logger.info(`Initialized Baileys session storage at: ${sessionPath}`);
   }
 
+  clearSession(): void {
+    try {
+      const sessionPath = path.resolve(config.sessionDir);
+      if (fs.existsSync(sessionPath)) {
+        fs.rmSync(sessionPath, { recursive: true, force: true });
+        fs.mkdirSync(sessionPath, { recursive: true });
+        logger.info(`[BaileysEngine] Folder sesi ${sessionPath} berhasil dibersihkan.`);
+      }
+    } catch (err: any) {
+      logger.error('Gagal membersihkan folder sesi:', err?.message || err);
+    }
+  }
+
   async connect(): Promise<void> {
     this.isIntentionallyClosed = false;
     this.updateState('connecting');
@@ -77,16 +90,41 @@ export class BaileysEngine implements IWhatsAppEngine {
 
         if (connection === 'close') {
           const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
-          const shouldReconnect = statusCode !== DisconnectReason.loggedOut && !this.isIntentionallyClosed;
+          const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+          const isBadSession = statusCode === DisconnectReason.badSession;
+          const isRestartRequired = statusCode === DisconnectReason.restartRequired;
 
-          logger.warn(`Connection closed. Status code: ${statusCode}. Reconnecting: ${shouldReconnect}`);
+          logger.warn(`Connection closed. Status code: ${statusCode}. LoggedOut: ${isLoggedOut}. Reconnecting: ${!this.isIntentionallyClosed}`);
           this.updateState('disconnected');
 
-          if (shouldReconnect) {
-            this.scheduleReconnect();
-          } else {
+          if (this.isIntentionallyClosed) {
             this.updateState('closed');
+            return;
           }
+
+          // If session was revoked by WhatsApp or corrupted, wipe old credentials and reconnect cleanly
+          if (isLoggedOut || isBadSession) {
+            logger.warn(`⚠️ [BaileysEngine] Sesi WhatsApp telah kedaluwarsa atau dikeluarkan (Status: ${statusCode}). Membersihkan sesi lama dan menyiapkan koneksi baru untuk pairing...`);
+            this.clearSession();
+            this.reconnectAttempts = 0;
+            this.updateState('connecting');
+            setTimeout(() => {
+              this.connect();
+            }, 2000);
+            return;
+          }
+
+          // WhatsApp server requests immediate restart (common right after pairing / companion sync)
+          if (isRestartRequired) {
+            logger.info('🔄 [BaileysEngine] WhatsApp meminta restart koneksi (515). Menghubungkan ulang segera...');
+            setTimeout(() => {
+              this.connect();
+            }, 1000);
+            return;
+          }
+
+          // Normal disconnects (408 timedOut, 428 connectionClosed, 503 unavailableService, etc.)
+          this.scheduleReconnect();
         } else if (connection === 'open') {
           this.reconnectAttempts = 0;
           this.qrCodeString = undefined;
@@ -378,9 +416,6 @@ export class BaileysEngine implements IWhatsAppEngine {
   }
 
   async requestPairingCode(phoneNumber: string): Promise<string> {
-    if (!this.socket) {
-      throw new Error('Baileys socket is not initialized');
-    }
     let cleanNumber = phoneNumber.replace(/[^0-9]/g, '');
     if (cleanNumber.startsWith('08')) {
       cleanNumber = '62' + cleanNumber.slice(1);
@@ -389,20 +424,49 @@ export class BaileysEngine implements IWhatsAppEngine {
       throw new Error('Nomor telepon tidak valid untuk pairing code WhatsApp (contoh: 628123456789 atau 08123456789)');
     }
 
-    try {
-      const code = await this.socket.requestPairingCode(cleanNumber);
-      this.pairingCodeString = code;
-      logger.info('═══════════════════════════════════════════════════════════');
-      logger.info(`🔑 WHATSAPP PAIRING CODE: ${code}`);
-      logger.info(`Buka WhatsApp di HP > Perangkat Tertaut > Tautkan dengan nomor telepon`);
-      logger.info(`Masukkan 8 digit kode di atas untuk menghubungkan bot.`);
-      logger.info('═══════════════════════════════════════════════════════════');
-      this.notifyConnection();
-      return code;
-    } catch (err: any) {
-      logger.error('Failed to request WhatsApp pairing code:', err);
-      throw err;
+    // If socket is not initialized, closed, or disconnected, re-connect automatically
+    if (!this.socket || this.state === 'closed' || this.state === 'disconnected') {
+      logger.info('[BaileysEngine] Menghubungkan ulang socket WhatsApp sebelum meminta pairing code...');
+      await this.connect();
+      await new Promise(res => setTimeout(res, 1500));
     }
+
+    // Retry loop: WebSocket handshake takes 1-2 seconds, so retry if connection closed initially
+    let lastError: any = null;
+    for (let attempt = 1; attempt <= 6; attempt++) {
+      try {
+        if (!this.socket) {
+          throw new Error('Socket WhatsApp belum siap');
+        }
+        logger.info(`[BaileysEngine] Menghubungi server WhatsApp untuk kode pairing (Percobaan ${attempt}/6)...`);
+        const rawCode = await this.socket.requestPairingCode(cleanNumber);
+
+        // Format as XXXX-XXXX if 8 chars for ease of typing
+        const code = rawCode && rawCode.length === 8
+          ? `${rawCode.slice(0, 4)}-${rawCode.slice(4)}`
+          : rawCode;
+
+        this.pairingCodeString = code;
+        logger.info('═══════════════════════════════════════════════════════════');
+        logger.info(`🔑 KODE PAIRING WHATSAPP: ${code}`);
+        logger.info(`Target Nomor: +${cleanNumber}`);
+        logger.info(`Langkah di HP:`);
+        logger.info(`1. Buka WhatsApp > Titik Tiga (⋮) > Perangkat Tertaut > Tautkan Perangkat`);
+        logger.info(`2. Pilih "Tautkan dengan nomor telepon saja"`);
+        logger.info(`3. Masukkan 8 digit kode di atas: ${code}`);
+        logger.info('═══════════════════════════════════════════════════════════');
+        this.notifyConnection();
+        return code;
+      } catch (err: any) {
+        lastError = err;
+        const errMsg = err?.message || String(err);
+        logger.info(`[BaileysEngine] Percobaan ${attempt} belum siap (${errMsg}), menunggu koneksi WebSocket...`);
+        await new Promise(res => setTimeout(res, 1500));
+      }
+    }
+
+    logger.error('Gagal mendapatkan pairing code setelah 6 kali percobaan:', lastError);
+    throw lastError || new Error('Gagal meminta pairing code dari server WhatsApp');
   }
 
   getStatus(): ConnectionStatus {
