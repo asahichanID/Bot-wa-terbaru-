@@ -1,0 +1,214 @@
+import express from 'express';
+import path from 'path';
+import { createServer as createViteServer } from 'vite';
+import { BotEngine } from './src/core/BotEngine';
+import { PingPlugin } from './src/plugins/ping';
+import { InfoPlugin } from './src/plugins/info';
+import { UpdatePlugin } from './src/plugins/update';
+import { TetrisPlugin } from './src/plugins/tetris';
+import { SimulatorEngine } from './src/whatsapp/SimulatorEngine';
+import { BaileysEngine } from './src/whatsapp/BaileysEngine';
+import { Logger } from './src/utils/logger';
+import { runAllTests } from './src/tests/bot.test';
+
+const logger = new Logger('Server');
+const PORT = 3000;
+
+// Shared Bot Instance
+let botInstance: BotEngine | null = null;
+let currentEngineMode: 'baileys' | 'simulator' = (process.env.WA_ENGINE as 'baileys' | 'simulator') || 'simulator';
+
+async function initBot() {
+  if (botInstance) return botInstance;
+
+  logger.info(`Booting Modular WhatsApp Bot (Engine: ${currentEngineMode})...`);
+  botInstance = new BotEngine({
+    waEngine: currentEngineMode,
+    botName: process.env.BOT_NAME || 'ModularWABot',
+  });
+
+  botInstance.pluginLoader.registerPlugin(new PingPlugin());
+  botInstance.pluginLoader.registerPlugin(new InfoPlugin());
+  botInstance.pluginLoader.registerPlugin(new UpdatePlugin());
+  botInstance.pluginLoader.registerPlugin(new TetrisPlugin());
+
+  await botInstance.start();
+  logger.info('Bot booted successfully inside server!');
+  return botInstance;
+}
+
+async function startServer() {
+  const app = express();
+  app.use(express.json());
+
+  // Initialize bot in background
+  const botPromise = initBot();
+
+  // API Routes
+  app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok', time: Date.now() });
+  });
+
+  app.get('/api/status', async (req, res) => {
+    try {
+      const bot = await botPromise;
+      const waStatus = bot.wa.getStatus();
+      const plugins = bot.pluginLoader.getAllPlugins().map(p => ({
+        name: p.manifest.name,
+        version: p.manifest.version,
+        description: p.manifest.description,
+        commandCount: p.getCommands().length,
+      }));
+
+      const tetrisPlugin = bot.pluginLoader.getAllPlugins().find(p => p.manifest.name === 'tetris') as TetrisPlugin;
+      const activeGames = tetrisPlugin ? tetrisPlugin.getManager().getActiveGameCount() : 0;
+
+      res.json({
+        botName: bot.config.botName,
+        uptime: bot.getUptimeSeconds(),
+        engineMode: currentEngineMode,
+        waStatus,
+        plugins,
+        commandCount: bot.pluginLoader.getCommandCount(),
+        activeTetrisGames: activeGames,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/logs', (req, res) => {
+    res.json({ logs: Logger.getRecentLogs() });
+  });
+
+  app.get('/api/leaderboard', async (req, res) => {
+    try {
+      const bot = await botPromise;
+      const top = await bot.db.leaderboard.getTopScores('tetris', 10);
+      res.json({ leaderboard: top });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // WhatsApp Chat Simulator API (Allows web users to test commands & Tetris controls in real-time)
+  app.get('/api/chat/history', async (req, res) => {
+    const bot = await botPromise;
+    const engine = bot.wa.getEngine();
+    if (engine instanceof SimulatorEngine) {
+      res.json({ messages: engine.getChatHistory() });
+    } else {
+      res.json({ messages: [] });
+    }
+  });
+
+  app.post('/api/chat/send', async (req, res) => {
+    const { text, senderJid, pushName, isControllerAction } = req.body;
+    if (!text) {
+      res.status(400).json({ error: 'Text message is required' });
+      return;
+    }
+
+    try {
+      const bot = await botPromise;
+      const engine = bot.wa.getEngine();
+      const jid = senderJid || '6281234567890@s.whatsapp.net';
+      const name = pushName || 'WebTester';
+
+      if (engine instanceof SimulatorEngine) {
+        await engine.simulateInboundMessage(jid, text, name, !!isControllerAction);
+        res.json({
+          success: true,
+          lastResponse: engine.getLastOutboundMessage(),
+          history: engine.getChatHistory(),
+        });
+      } else {
+        res.status(400).json({
+          error: 'Current engine is live Baileys. Use connected phone to send messages or switch to Simulator engine.',
+        });
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Request WhatsApp Pairing Code (Baileys)
+  app.post('/api/whatsapp/pairing-code', async (req, res) => {
+    const { phoneNumber } = req.body;
+    if (!phoneNumber) {
+      res.status(400).json({ error: 'Nomor telepon wajib diisi (contoh: 628123456789)' });
+      return;
+    }
+
+    try {
+      const bot = await botPromise;
+      const engine = bot.wa.getEngine();
+      if (engine instanceof BaileysEngine) {
+        const code = await engine.requestPairingCode(phoneNumber);
+        res.json({ success: true, code });
+      } else {
+        res.status(400).json({ error: 'Pairing code hanya tersedia saat menggunakan Baileys Engine' });
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Gagal meminta pairing code' });
+    }
+  });
+
+  // Switch Engine (Baileys vs Simulator)
+  app.post('/api/engine/switch', async (req, res) => {
+    const { mode } = req.body;
+    if (mode !== 'baileys' && mode !== 'simulator') {
+      res.status(400).json({ error: 'Invalid mode' });
+      return;
+    }
+
+    try {
+      const bot = await botPromise;
+      if (mode === currentEngineMode) {
+        res.json({ success: true, mode });
+        return;
+      }
+
+      currentEngineMode = mode;
+      const newEngine = mode === 'baileys' ? new BaileysEngine() : new SimulatorEngine();
+      await bot.wa.switchEngine(newEngine);
+      res.json({ success: true, mode, status: bot.wa.getStatus() });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Run WAJIB Test Suite via API
+  app.post('/api/tests/run', async (req, res) => {
+    try {
+      logger.info('Running WAJIB Test Suite on demand...');
+      await runAllTests();
+      res.json({ success: true, message: 'All 6 WAJIB tests passed successfully!' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Vite integration for dev & prod
+  if (process.env.NODE_ENV !== 'production') {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    logger.info(`Server & Web Dashboard running on http://0.0.0.0:${PORT}`);
+  });
+}
+
+startServer().catch(err => {
+  logger.error('Failed to start server:', err);
+});

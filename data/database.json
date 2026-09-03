@@ -1,0 +1,14 @@
+{
+  "users": {
+    "6281234567890@s.whatsapp.net": {
+      "id": "6281234567890@s.whatsapp.net",
+      "phoneNumber": "6281234567890",
+      "pushName": "Tester",
+      "createdAt": 1788397047848,
+      "lastSeenAt": 1788397047848,
+      "role": "user"
+    }
+  },
+  "gameStats": {},
+  "settings": {}
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Modular WhatsApp Bot",
+  "description": "Production-ready modular WhatsApp bot with clean architecture, plugin system, Baileys WA engine, and interactive Tetris.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
