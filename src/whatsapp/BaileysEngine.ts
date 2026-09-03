@@ -121,13 +121,30 @@ export class BaileysEngine implements IWhatsAppEngine {
       }
 
       this.socket.ev.on('messages.upsert', async (upsert: any) => {
-        if (upsert.type !== 'notify') return;
+        if (!upsert.messages || !Array.isArray(upsert.messages)) return;
 
         for (const msg of upsert.messages) {
-          if (!msg.message || msg.key.fromMe) continue;
+          if (!msg.message) continue;
+
+          const from = msg.key.remoteJid || '';
+          if (from === 'status@broadcast') continue;
 
           const parsed = this.parseInboundMessage(msg);
-          if (!parsed) continue;
+          if (!parsed || (!parsed.text && parsed.type !== 'reaction')) continue;
+
+          // If fromMe is true (message sent from the WhatsApp account paired to this bot):
+          // Allow if message starts with bot prefix (e.g. '.') or is a recognized game action.
+          // This allows the bot owner to test and play directly from their own phone/account,
+          // while preventing the bot from looping on its own automated outputs!
+          if (msg.key.fromMe) {
+            const isPrefixed = parsed.text.startsWith(config.prefix);
+            const isQuickAction = this.isGameQuickAction(parsed.text);
+            if (!isPrefixed && !isQuickAction) {
+              continue;
+            }
+          }
+
+          logger.info(`📨 [WhatsApp] Pesan masuk dari ${parsed.sender} (${parsed.pushName || 'User'}): "${parsed.text}"`);
 
           for (const handler of this.messageHandlers) {
             try {
@@ -145,14 +162,50 @@ export class BaileysEngine implements IWhatsAppEngine {
     }
   }
 
+  private isGameQuickAction(text: string): boolean {
+    const clean = text.trim().toLowerCase();
+    const actions = [
+      'kiri', 'kanan', 'putar', 'turun', 'hard', 'hold', 'jeda', 'ulang',
+      'left', 'right', 'rotate', 'rot', 'drop', 'stop', 'quit',
+      '⬅️', '➡️', '🔄', '⬇️', '⚡', '📦', '⏸️'
+    ];
+    return actions.includes(clean);
+  }
+
   private parseInboundMessage(msg: any): InboundMessage | null {
-    const from = msg.key.remoteJid || '';
-    const sender = msg.key.participant || from;
-    const pushName = msg.pushName || '';
+    let from = msg.key.remoteJid || '';
+    if (!from || from === 'status@broadcast') return null;
+
+    // Normalize device suffixes (e.g. 628123:1@s.whatsapp.net -> 628123@s.whatsapp.net)
+    from = from.replace(/:\d+@/, '@');
+
     const isGroup = from.endsWith('@g.us');
+    let sender = msg.key.participant || from;
+    sender = sender.replace(/:\d+@/, '@');
+
+    const pushName = msg.pushName || '';
     const timestamp = typeof msg.messageTimestamp === 'number' ? msg.messageTimestamp * 1000 : Date.now();
 
-    const m = msg.message;
+    // Unwrap nested wrappers: ephemeralMessage, viewOnceMessage, etc.
+    let m = msg.message;
+    while (
+      m &&
+      (m.ephemeralMessage?.message ||
+        m.viewOnceMessage?.message ||
+        m.viewOnceMessageV2?.message ||
+        m.documentWithCaptionMessage?.message ||
+        m.editedMessage?.message?.protocolMessage?.editedMessage)
+    ) {
+      m =
+        m.ephemeralMessage?.message ||
+        m.viewOnceMessage?.message ||
+        m.viewOnceMessageV2?.message ||
+        m.documentWithCaptionMessage?.message ||
+        m.editedMessage?.message?.protocolMessage?.editedMessage;
+    }
+
+    if (!m) return null;
+
     let text = '';
     let type: InboundMessage['type'] = 'text';
 
@@ -160,6 +213,12 @@ export class BaileysEngine implements IWhatsAppEngine {
       text = m.conversation;
     } else if (m.extendedTextMessage?.text) {
       text = m.extendedTextMessage.text;
+    } else if (m.imageMessage?.caption) {
+      text = m.imageMessage.caption;
+    } else if (m.videoMessage?.caption) {
+      text = m.videoMessage.caption;
+    } else if (m.documentMessage?.caption) {
+      text = m.documentMessage.caption;
     } else if (m.buttonsResponseMessage?.selectedButtonId) {
       text = m.buttonsResponseMessage.selectedButtonId;
       type = 'button_response';
@@ -174,12 +233,15 @@ export class BaileysEngine implements IWhatsAppEngine {
       } catch {
         text = '';
       }
+    } else if (m.listResponseMessage?.singleSelectReply?.selectedRowId) {
+      text = m.listResponseMessage.singleSelectReply.selectedRowId;
+      type = 'button_response';
     } else if (m.reactionMessage) {
       text = m.reactionMessage.text || '';
       type = 'reaction';
     }
 
-    if (!text && !type) return null;
+    if (!text && type !== 'reaction') return null;
 
     return {
       id: msg.key.id || String(Date.now()),
@@ -237,6 +299,8 @@ export class BaileysEngine implements IWhatsAppEngine {
       return { id: `sim-${Date.now()}` };
     }
 
+    const cleanTo = to.replace(/:\d+@/, '@');
+
     // Build payload with interactive button fallback
     let messageText = content.text;
     if (content.buttons && content.buttons.length > 0 && !messageText.includes('Tombol Kontrol:')) {
@@ -255,27 +319,30 @@ export class BaileysEngine implements IWhatsAppEngine {
       if (content.editId) {
         // WhatsApp Baileys protocol message edit (in-place update)
         const editKey = {
-          remoteJid: to,
+          remoteJid: cleanTo,
           fromMe: true,
           id: content.editId,
         };
-        const sent = await this.socket.sendMessage(to, {
+        logger.info(`🔄 [Baileys] Edit pesan game in-place (ID: ${content.editId}) ke ${cleanTo}`);
+        const sent = await this.socket.sendMessage(cleanTo, {
           text: messageText,
           edit: editKey,
         });
         return { id: sent?.key?.id || content.editId };
       }
 
-      const sent = await this.socket.sendMessage(to, {
+      logger.info(`📤 [Baileys] Mengirim balasan ke ${cleanTo}`);
+      const sent = await this.socket.sendMessage(cleanTo, {
         text: messageText,
       });
       return { id: sent?.key?.id || String(Date.now()) };
-    } catch (err) {
-      logger.error(`Failed to send message to ${to}:`, err);
+    } catch (err: any) {
+      logger.error(`Failed to send message to ${cleanTo}:`, err?.message || err);
       // Fallback: If editing fails (e.g. message too old or unsupported WhatsApp client), send new message
       if (content.editId) {
         try {
-          const fallback = await this.socket.sendMessage(to, { text: messageText });
+          logger.info(`⚠️ Edit gagal, fallback mengirim pesan baru ke ${cleanTo}...`);
+          const fallback = await this.socket.sendMessage(cleanTo, { text: messageText });
           return { id: fallback?.key?.id || String(Date.now()) };
         } catch {
           // ignore fallback error

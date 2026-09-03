@@ -30,6 +30,46 @@ export class InfoPlugin extends PluginBase {
       cooldownMs: this.pluginConfig.cooldownMs,
       execute: this.handleInfo.bind(this),
     });
+
+    this.registerCommand({
+      name: 'help',
+      aliases: ['menu', 'bantuan', '?'],
+      description: 'Menampilkan daftar perintah lengkap bot',
+      category: 'General',
+      cooldownMs: this.pluginConfig.cooldownMs,
+      execute: this.handleHelp.bind(this),
+    });
+  }
+
+  private async handleHelp(ctx: CommandContext): Promise<void> {
+    const text =
+      `📋 *DAFTAR PERINTAH BOT* 🤖\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `🎮 *GAME TETRIS:*\n` +
+      `• \`.tetris\` - Mulai main Tetris (single message update)\n` +
+      `• \`.tetris lb\` - Lihat Leaderboard top player\n` +
+      `• \`.tetris stats\` - Cek statistik bermain kamu\n` +
+      `• \`.tetris stop\` - Berhenti / reset sesi permainan\n\n` +
+      `🕹️ *KONTROL CEPAT TETRIS:*\n` +
+      `Ketik langsung saat game berjalan:\n` +
+      `• \`kiri\` / \`⬅️\` : Geser balok ke kiri\n` +
+      `• \`kanan\` / \`➡️\` : Geser balok ke kanan\n` +
+      `• \`putar\` / \`🔄\` : Putar rotasi balok\n` +
+      `• \`turun\` / \`⬇️\` : Jatuhkan pelan (soft drop)\n` +
+      `• \`hard\` / \`⚡\` : Jatuhkan langsung ke dasar\n` +
+      `• \`hold\` / \`📦\` : Simpan balok cadangan\n` +
+      `• \`jeda\` / \`⏸️\` : Pause / Lanjut game\n` +
+      `• \`ulang\` : Mulai ulang permainan baru\n\n` +
+      `⚙️ *INFO & SISTEM:*\n` +
+      `• \`.ping\` - Cek respon & latensi bot\n` +
+      `• \`.info\` - Informasi detail sistem server\n` +
+      `• \`.help\` - Menampilkan menu panduan ini\n` +
+      `━━━━━━━━━━━━━━━━━━━━`;
+
+    await ctx.reply({
+      text,
+      footer: 'Ketik .tetris untuk mulai bermain!',
+    });
   }
 
   private async handleInfo(ctx: CommandContext): Promise<void> {

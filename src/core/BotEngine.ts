@@ -92,6 +92,8 @@ export class BotEngine {
     const text = msg.text.trim();
     if (!text) return;
 
+    logger.info(`📩 [Pesan Masuk] Dari: ${msg.sender} (${msg.pushName || 'User'}) | Teks: "${text}"`);
+
     // Check prefix or special triggers
     const hasPrefix = text.startsWith(this.config.prefix);
     let trigger = '';
@@ -113,9 +115,13 @@ export class BotEngine {
     }
 
     const matched = this.pluginLoader.getCommand(trigger);
-    if (!matched) return;
+    if (!matched) {
+      logger.debug(`[BotEngine] Perintah "${trigger}" tidak dikenali.`);
+      return;
+    }
 
     const { plugin, command } = matched;
+    logger.info(`⚡ [Eksekusi Perintah] Menjalankan .${command.name} untuk ${msg.sender}`);
 
     // Anti-spam / Rate Limiting per user
     const rateCheck = this.rateLimiter.check(msg.sender);
@@ -163,7 +169,9 @@ export class BotEngine {
       this.eventBus.emit('command:before', command.name, ctx);
       await command.execute(ctx);
       this.eventBus.emit('command:after', command.name, ctx);
+      logger.info(`✅ [Selesai] Perintah .${command.name} berhasil dijalankan untuk ${msg.sender}`);
     } catch (err) {
+      logger.error(`❌ [Error] Gagal mengeksekusi .${command.name}:`, err);
       await this.errorHandler.handlePluginError(plugin.manifest.name, err, ctx);
     }
   }
