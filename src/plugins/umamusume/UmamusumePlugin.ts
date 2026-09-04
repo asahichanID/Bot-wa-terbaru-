@@ -178,6 +178,10 @@ Halo, Trainer *${trainer}*! Selamat datang di bot Tracen Academy. Semua perintah
     Simulasi pacuan balap Turf bergengsi (Arima Kinen, Japan Cup).
 
 ✨ *HIBURAN & TRIVIA:*
+▫️ *.play* <judul lagu>
+    Cari & putar lagu YouTube via panel Spotify UI 1-pesan (maks 30 hasil).
+▫️ *.play2* <judul lagu>
+    Cari & unduh berkas MP3 lagu YouTube durasi penuh (pesan audio terpisah).
 ▫️ *.gacha* / *.scout*
     Pencarian bakat (Scout) Uma Musume bintang 3 Tracen.
 ▫️ *.quote*

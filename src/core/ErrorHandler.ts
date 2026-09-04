@@ -13,7 +13,7 @@ export class ErrorHandler {
 
   async handlePluginError(pluginName: string, error: unknown, ctx?: CommandContext): Promise<void> {
     const err = error instanceof Error ? error : new Error(String(error));
-    logger.error(`[Plugin: ${pluginName}] Runtime Error: ${err.message}`, err.stack);
+    logger.error(`[Plugin: ${pluginName}] Runtime Error: ${err.message}`);
 
     this.eventBus.emit('plugin:error', pluginName, err, ctx);
 

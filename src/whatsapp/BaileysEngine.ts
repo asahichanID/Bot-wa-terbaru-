@@ -434,7 +434,288 @@ export class BaileysEngine implements IWhatsAppEngine {
     };
 
     try {
-      // 0. IMAGE + CAPTION MESSAGE (Oguri Cap mascot illustration attached directly to text)
+      // 0. MUSIC PLAYER UI CARD (Spotify-like interactive playback in 1 single message with thumbnail & audio)
+      if (content.musicCard) {
+        try {
+          logger.info(`📤 [Baileys] Mengirim UI Pemutar Musik (Spotify-style) untuk "${content.musicCard.title}" ke ${cleanTo}`);
+          const audioContextInfo = {
+            ...forwardedContextInfo,
+            externalAdReply: {
+              title: content.musicCard.title,
+              body: `🎧 ${content.musicCard.botName || 'Oguri Cap • Tracen Sound'} [${content.musicCard.duration}]`,
+              mediaType: 2,
+              thumbnailUrl: content.musicCard.thumbnail,
+              sourceUrl: (content.musicCard.audioUrl && content.musicCard.audioUrl.startsWith('http')) ? content.musicCard.audioUrl : 'https://youtube.com',
+              renderLargerThumbnail: true,
+              showAdAttribution: false,
+            },
+          };
+
+          // Resolve audio source: Buffer or URL
+          let resolvedAudio: any = null;
+          const rawUrl = content.musicCard.audioUrl || '';
+          const fallbackLocal = path.join(process.cwd(), 'assets', 'audio', 'tracen_preview.mp3');
+
+          if (rawUrl.startsWith('/')) {
+            const localFile = path.join(process.cwd(), rawUrl);
+            if (fs.existsSync(localFile)) {
+              resolvedAudio = fs.readFileSync(localFile);
+            } else if (fs.existsSync(fallbackLocal)) {
+              resolvedAudio = fs.readFileSync(fallbackLocal);
+            } else {
+              resolvedAudio = { url: `http://127.0.0.1:3000${rawUrl}` };
+            }
+          } else if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+            try {
+              const fetchRes = await fetch(rawUrl, { signal: AbortSignal.timeout(6000) });
+              const cType = fetchRes.headers.get('content-type') || '';
+              if (fetchRes.ok && (cType.includes('audio') || cType.includes('octet-stream'))) {
+                resolvedAudio = Buffer.from(await fetchRes.arrayBuffer());
+              } else {
+                resolvedAudio = { url: rawUrl };
+              }
+            } catch {
+              resolvedAudio = fs.existsSync(fallbackLocal) ? fs.readFileSync(fallbackLocal) : { url: rawUrl };
+            }
+          } else if (fs.existsSync(fallbackLocal)) {
+            resolvedAudio = fs.readFileSync(fallbackLocal);
+          }
+
+          const sent = await this.socket.sendMessage(cleanTo, {
+            audio: resolvedAudio || { url: content.musicCard.audioUrl },
+            mimetype: content.audioMimetype || 'audio/mp4',
+            ptt: false,
+            fileName: `${content.musicCard.title}.mp3`,
+            contextInfo: audioContextInfo,
+          });
+
+          const sentId = sent?.key?.id || String(Date.now());
+          if (sentId && sent?.message) {
+            this.saveMessageToStore(sentId, sent.message);
+          }
+          return { id: sentId };
+        } catch (musicErr: any) {
+          logger.warn(`⚠️ Pengiriman musicCard audio gagal (${musicErr?.message || musicErr}), mencoba fallback image/teks...`);
+        }
+      }
+
+      // 0.1 STANDALONE AUDIO MESSAGE (for .play2 audio dispatch)
+      if (content.audioUrl) {
+        try {
+          logger.info(`📤 [Baileys] Mengirim berkas audio mandiri ke ${cleanTo}`);
+          let resolvedAudio: any = null;
+          const rawUrl = content.audioUrl;
+          const fallbackLocal = path.join(process.cwd(), 'assets', 'audio', 'tracen_preview.mp3');
+
+          if (rawUrl.startsWith('/')) {
+            const localFile = path.join(process.cwd(), rawUrl);
+            if (fs.existsSync(localFile)) {
+              resolvedAudio = fs.readFileSync(localFile);
+            } else if (fs.existsSync(fallbackLocal)) {
+              resolvedAudio = fs.readFileSync(fallbackLocal);
+            } else {
+              resolvedAudio = { url: `http://127.0.0.1:3000${rawUrl}` };
+            }
+          } else {
+            resolvedAudio = { url: rawUrl };
+          }
+
+          const sent = await this.socket.sendMessage(cleanTo, {
+            audio: resolvedAudio,
+            mimetype: content.audioMimetype || 'audio/mp4',
+            ptt: false,
+            contextInfo: forwardedContextInfo,
+          });
+          const sentId = sent?.key?.id || String(Date.now());
+          if (sentId && sent?.message) {
+            this.saveMessageToStore(sentId, sent.message);
+          }
+          return { id: sentId };
+        } catch (audioErr: any) {
+          logger.warn(`⚠️ Pengiriman audio mandiri gagal: ${audioErr?.message || audioErr}`);
+        }
+      }
+
+      // 1. IN-PLACE EDIT (1 single message simulator gameplay without creating new messages)
+      if (content.editId) {
+        const editKey = {
+          remoteJid: cleanTo,
+          fromMe: true,
+          id: content.editId,
+        };
+        logger.info(`🔄 [Baileys] Edit pesan game in-place (ID: ${content.editId}) ke ${cleanTo}`);
+
+        try {
+          const sent = await this.socket.sendMessage(cleanTo, {
+            text: messageText,
+            edit: editKey,
+            contextInfo: forwardedContextInfo,
+          });
+          const sentId = sent?.key?.id || content.editId;
+          if (sentId && sent?.message) {
+            this.saveMessageToStore(sentId, sent.message);
+          }
+          return { id: sentId };
+        } catch (editErr: any) {
+          logger.warn(`⚠️ Edit pesan in-place gagal (${editErr?.message || editErr}), mencoba kirim ulang...`);
+        }
+      }
+
+      // 2. WHATSAPP NATIVE INTERACTIVE MESSAGES (single_select list menu & quick_reply buttons)
+      const hasInteractiveList = !!(content.interactiveList?.items && content.interactiveList.items.length > 0);
+      const hasButtons = !!(content.buttons && content.buttons.length > 0);
+
+      if ((hasInteractiveList || hasButtons) && this.baileysModule?.generateWAMessageFromContent) {
+        try {
+          const nativeButtons: any[] = [];
+
+          // 2.1 Native Flow single_select (Interactive bottom sheet list with up to 30 items)
+          if (hasInteractiveList && content.interactiveList) {
+            const rows = content.interactiveList.items.slice(0, 30).map((it, idx) => ({
+              header: `${idx + 1}`,
+              title: (it.title || `Lagu #${idx + 1}`).slice(0, 60),
+              description: (it.description || it.author || '').slice(0, 72),
+              id: it.id || `.yt ${it.url}`,
+            }));
+
+            nativeButtons.push({
+              name: 'single_select',
+              buttonParamsJson: JSON.stringify({
+                title: (content.interactiveList.buttonText || '🎵 Pilih Lagu (Daftar)').slice(0, 40),
+                sections: [
+                  {
+                    title: (content.interactiveList.title || 'Daftar Hasil Pencarian').slice(0, 24),
+                    highlight_label: 'Tracen Jukebox',
+                    rows,
+                  },
+                ],
+              }),
+            });
+          }
+
+          // 2.2 Native Flow quick_reply buttons (Top quick options)
+          if (hasButtons && content.buttons) {
+            for (const btn of content.buttons.slice(0, 3)) {
+              nativeButtons.push({
+                name: 'quick_reply',
+                buttonParamsJson: JSON.stringify({
+                  display_text: btn.text.slice(0, 25),
+                  id: btn.id,
+                }),
+              });
+            }
+          }
+
+          // WhatsApp binary nodes required for native flow interactive messages
+          const additionalNodes: any[] = [
+            {
+              tag: 'biz',
+              attrs: {},
+              content: [
+                {
+                  tag: 'interactive',
+                  attrs: {
+                    type: 'native_flow',
+                    v: '1',
+                  },
+                  content: [
+                    { tag: 'native_flow', attrs: { name: 'single_select' } },
+                    { tag: 'native_flow', attrs: { name: 'quick_reply' } },
+                  ],
+                },
+              ],
+            },
+          ];
+
+          if (!isGroup) {
+            additionalNodes.push({
+              tag: 'bot',
+              attrs: {
+                biz_bot: '1',
+              },
+            });
+          }
+
+          const interactivePayload = {
+            viewOnceMessage: {
+              message: {
+                messageContextInfo: {
+                  deviceListMetadata: {},
+                  deviceListMetadataVersion: 2,
+                },
+                interactiveMessage: {
+                  body: {
+                    text: messageText,
+                  },
+                  footer: {
+                    text: content.footer || 'Tracen Academy Sound • WhatsApp Interactive',
+                  },
+                  header: {
+                    title: content.interactiveList?.title || '🎵 *TRACEN JUKEBOX*',
+                    hasMediaAttachment: false,
+                  },
+                  nativeFlowMessage: {
+                    buttons: nativeButtons,
+                    messageParamsJson: '',
+                  },
+                  contextInfo: forwardedContextInfo,
+                },
+              },
+            },
+          };
+
+          const waMsg = this.baileysModule.generateWAMessageFromContent(cleanTo, interactivePayload, {
+            userJid: this.socket.user?.id || cleanTo,
+          });
+
+          logger.info(`📤 [Baileys] Mengirim WhatsApp native interactive message (${nativeButtons.length} elemen interactive) ke ${cleanTo}`);
+
+          await this.socket.relayMessage(cleanTo, waMsg.message, {
+            messageId: waMsg.key.id,
+            additionalNodes,
+          });
+
+          if (waMsg?.key?.id && waMsg?.message) {
+            this.saveMessageToStore(waMsg.key.id, waMsg.message);
+          }
+
+          return { id: waMsg.key.id };
+        } catch (intErr: any) {
+          logger.warn(`Interactive relayMessage gagal (${intErr?.message || intErr}), mencoba fallback ke standard listMessage sections...`);
+
+          // Fallback 1: Standard WhatsApp List Message with sections
+          if (hasInteractiveList && content.interactiveList) {
+            try {
+              const sent = await this.socket.sendMessage(cleanTo, {
+                text: messageText,
+                footer: content.footer,
+                title: content.interactiveList.title || '🎵 Tracen Jukebox',
+                buttonText: content.interactiveList.buttonText || 'Pilih Lagu',
+                sections: [
+                  {
+                    title: 'Daftar Lagu (1-30)',
+                    rows: content.interactiveList.items.slice(0, 30).map((it, idx) => ({
+                      title: `${idx + 1}. ${it.title.slice(0, 24)}`,
+                      description: (it.description || '').slice(0, 50),
+                      rowId: it.id || `.yt ${it.url}`,
+                    })),
+                  },
+                ],
+                contextInfo: forwardedContextInfo,
+              });
+              const sentId = sent?.key?.id || String(Date.now());
+              if (sentId && sent?.message) {
+                this.saveMessageToStore(sentId, sent.message);
+              }
+              return { id: sentId };
+            } catch (listErr: any) {
+              logger.warn(`Fallback listMessage sections gagal: ${listErr?.message || listErr}`);
+            }
+          }
+        }
+      }
+
+      // 3. IMAGE + CAPTION MESSAGE (Only if not interactive or interactive was not requested)
       if (content.imageUrl || content.imageBuffer || content.showMascot) {
         try {
           let imageSource: any;
@@ -465,125 +746,6 @@ export class BaileysEngine implements IWhatsAppEngine {
           return { id: sentId };
         } catch (imgErr: any) {
           logger.warn(`⚠️ Pengiriman gambar gagal, fallback ke pesan teks biasa: ${imgErr?.message || imgErr}`);
-        }
-      }
-
-      // 1. IN-PLACE EDIT (1 single message simulator gameplay without creating new messages)
-      if (content.editId) {
-        const editKey = {
-          remoteJid: cleanTo,
-          fromMe: true,
-          id: content.editId,
-        };
-        logger.info(`🔄 [Baileys] Edit pesan game in-place (ID: ${content.editId}) ke ${cleanTo}`);
-
-        try {
-          const sent = await this.socket.sendMessage(cleanTo, {
-            text: messageText,
-            edit: editKey,
-            contextInfo: forwardedContextInfo,
-          });
-          const sentId = sent?.key?.id || content.editId;
-          if (sentId && sent?.message) {
-            this.saveMessageToStore(sentId, sent.message);
-          }
-          return { id: sentId };
-        } catch (editErr: any) {
-          logger.warn(`⚠️ Edit pesan in-place gagal (${editErr?.message || editErr}), mencoba kirim ulang...`);
-        }
-      }
-
-      // 2. NATIVE INTERACTIVE BUTTONS WITH BINARY NODES & FORWARDED BADGE
-      if (content.buttons && content.buttons.length > 0 && this.baileysModule?.generateWAMessageFromContent) {
-        try {
-          const nativeButtons = content.buttons.map((btn) => ({
-            name: 'quick_reply',
-            buttonParamsJson: JSON.stringify({
-              display_text: btn.text,
-              id: btn.id,
-            }),
-          }));
-
-          // WhatsApp binary nodes required for native flow quick_reply buttons
-          const additionalNodes: any[] = [
-            {
-              tag: 'biz',
-              attrs: {},
-              content: [
-                {
-                  tag: 'interactive',
-                  attrs: {
-                    type: 'native_flow',
-                    v: '1',
-                  },
-                  content: [
-                    {
-                      tag: 'native_flow',
-                      attrs: {
-                        name: 'quick_reply',
-                      },
-                    },
-                  ],
-                },
-              ],
-            },
-          ];
-
-          if (!isGroup) {
-            additionalNodes.push({
-              tag: 'bot',
-              attrs: {
-                biz_bot: '1',
-              },
-            });
-          }
-
-          const interactivePayload = {
-            viewOnceMessage: {
-              message: {
-                messageContextInfo: {
-                  deviceListMetadata: {},
-                  deviceListMetadataVersion: 2,
-                },
-                interactiveMessage: {
-                  body: {
-                    text: messageText,
-                  },
-                  footer: {
-                    text: content.footer || '🎮 WhatsApp Tetris WebApp Simulator',
-                  },
-                  header: {
-                    title: '🎮 *TETRIS WHATSAPP SIMULATOR*',
-                    hasMediaAttachment: false,
-                  },
-                  nativeFlowMessage: {
-                    buttons: nativeButtons,
-                    messageParamsJson: '',
-                  },
-                  contextInfo: forwardedContextInfo,
-                },
-              },
-            },
-          };
-
-          const waMsg = this.baileysModule.generateWAMessageFromContent(cleanTo, interactivePayload, {
-            userJid: this.socket.user?.id || cleanTo,
-          });
-
-          logger.info(`📤 [Baileys] Mengirim interactive native message (${nativeButtons.length} tombol) dengan badge diteruskan & binary nodes ke ${cleanTo}`);
-
-          await this.socket.relayMessage(cleanTo, waMsg.message, {
-            messageId: waMsg.key.id,
-            additionalNodes,
-          });
-
-          if (waMsg?.key?.id && waMsg?.message) {
-            this.saveMessageToStore(waMsg.key.id, waMsg.message);
-          }
-
-          return { id: waMsg.key.id };
-        } catch (intErr: any) {
-          logger.warn(`Interactive relayMessage gagal, fallback ke pesan standar: ${intErr?.message || intErr}`);
         }
       }
 

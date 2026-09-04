@@ -12,7 +12,8 @@ try {
   execSync('npx vite build', { stdio: 'inherit' });
   console.log('✅ Web dashboard siap!');
 } catch (e) {
-  console.warn('⚠️ Web dashboard build skipped/warning (bot WhatsApp tetap aktif 100%).');
+  console.error('❌ Gagal build web dashboard:', e);
+  process.exit(1);
 }
 
 console.log('⚙️ [Build] 2/3 Mengompilasi engine bot WhatsApp (src/index.ts)...');

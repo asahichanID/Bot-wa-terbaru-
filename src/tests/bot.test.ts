@@ -19,6 +19,8 @@ import { JsonFileStorage } from '../database/JsonFileStorage';
 import { UmamusumePlugin } from '../plugins/umamusume';
 import { PingPlugin } from '../plugins/ping';
 import { InfoPlugin } from '../plugins/info';
+import { MusicPlugin } from '../plugins/music';
+import { Logger } from '../utils/logger';
 import path from 'path';
 import fs from 'fs';
 
@@ -69,6 +71,7 @@ async function runAllTests() {
   bot.pluginLoader.registerPlugin(umaPlugin);
   bot.pluginLoader.registerPlugin(new PingPlugin());
   bot.pluginLoader.registerPlugin(new InfoPlugin());
+  bot.pluginLoader.registerPlugin(new MusicPlugin());
 
   // -------------------------------------------------------------
   // TEST 1: Plugin Loaded & Core Functionality
@@ -152,6 +155,98 @@ async function runAllTests() {
   assert(topScores[0].score === 12500, 'Score properly retrieved from disk storage');
 
   // -------------------------------------------------------------
+  // TEST 4.5: Music Plugin (.play, .play2, Neoxr API & Spotify UI)
+  // -------------------------------------------------------------
+  console.log('\n--- [TEST 4.5] Music Plugin (.play & .play2 Jukebox) ---');
+  
+  // Test .play search
+  await simEngine.simulateInboundMessage('6281234567890@s.whatsapp.net', '.play Komang', 'Tester');
+  const playSearchResp = simEngine.getLastOutboundMessage();
+  assert(!!playSearchResp, '.play command responded');
+  assert(
+    !!playSearchResp && playSearchResp.text.includes('TRACEN JUKEBOX'),
+    '.play header formatted with Tracen theme'
+  );
+  assert(
+    !!playSearchResp && (playSearchResp.showMascot === true || !!playSearchResp.imageUrl),
+    '.play attaches Oguri Cap mascot illustration'
+  );
+  assert(
+    !!playSearchResp && playSearchResp.text.includes('Kecepatan Respon'),
+    '.play displays latency speed text'
+  );
+  assert(
+    !!playSearchResp && !!playSearchResp.interactiveList && playSearchResp.interactiveList.items.length > 0,
+    '.play returns interactiveList with up to 30 items for floating picker panel'
+  );
+
+  // Test selecting a song with .yt (Spotify UI mode)
+  const firstSongUrl = playSearchResp?.interactiveList?.items[0]?.url || 'https://youtube.com/watch?v=fKRtnMYMW08';
+  await simEngine.simulateInboundMessage(
+    '6281234567890@s.whatsapp.net',
+    `.yt ${firstSongUrl}`,
+    'Tester',
+    false,
+    'KOMANG - RAIM LAODE LYRIC OFFICIAL'
+  );
+  const ytPlayResp = simEngine.getLastOutboundMessage();
+  assert(!!ytPlayResp && !!ytPlayResp.musicCard, '.yt generates 1-message Spotify UI musicCard');
+  assert(
+    !!ytPlayResp && ytPlayResp.musicCard?.isSnippetOnly === true,
+    '.play Spotify UI handles 1-minute max snippet'
+  );
+  assert(
+    !!ytPlayResp && !!ytPlayResp.musicCard?.thumbnail,
+    '.play Spotify UI includes original thumbnail'
+  );
+  assert(
+    !!ytPlayResp && !!ytPlayResp.musicCard?.audioUrl,
+    '.play Spotify UI includes playable audioUrl stream/CDN'
+  );
+  assert(
+    !!ytPlayResp && ytPlayResp.musicCard?.middleStartSeconds !== undefined,
+    '.play Spotify UI calculates middle 1-minute segment for genuine preview'
+  );
+  assert(
+    !!ytPlayResp && !!ytPlayResp.musicCard?.videoId,
+    '.play Spotify UI includes genuine videoId for zero-CDN audio playback'
+  );
+
+  // Test .play2 (Full duration mode with separate audio message)
+  await simEngine.simulateInboundMessage(
+    '6281234567890@s.whatsapp.net',
+    `.yt2 ${firstSongUrl}`,
+    'Tester',
+    false,
+    'KOMANG - RAIM LAODE LYRIC OFFICIAL'
+  );
+  const history = simEngine.getChatHistory();
+  const lastTwo = history.slice(-2);
+  const infoMsg = lastTwo.find(m => m.text.includes('TRACEN AUDIO PLAYER (.PLAY2)'));
+  const audioMsg = lastTwo.find(m => !!m.audioUrl);
+  assert(!!infoMsg, '.play2 dispatches metadata message with original thumbnail');
+  assert(!!audioMsg, '.play2 dispatches separate full audio message');
+
+  // Test selecting song by pure numeric reply (fallback "1" without prefix)
+  console.log('Testing numeric reply fallback (typing "1")...');
+  await simEngine.simulateInboundMessage(
+    '6281234567890@s.whatsapp.net',
+    '.play komang',
+    'Tester'
+  );
+  // User replies with just "1"
+  await simEngine.simulateInboundMessage(
+    '6281234567890@s.whatsapp.net',
+    '1',
+    'Tester'
+  );
+  const numReplyResp = simEngine.getLastOutboundMessage();
+  assert(
+    !!numReplyResp && !!numReplyResp.musicCard,
+    'Replying with pure number "1" successfully selects and plays song #1 via session'
+  );
+
+  // -------------------------------------------------------------
   // TEST 5: Plugin Error Isolation (Bot Does Not Crash)
   // -------------------------------------------------------------
   console.log('\n--- [TEST 5] Plugin Error Isolation ---');
@@ -181,7 +276,12 @@ async function runAllTests() {
     }
   });
 
-  await simEngine.simulateInboundMessage('628199999999@s.whatsapp.net', '.crashme', 'CrashTester');
+  Logger.setSilent(true);
+  try {
+    await simEngine.simulateInboundMessage('628199999999@s.whatsapp.net', '.crashme', 'CrashTester');
+  } finally {
+    Logger.setSilent(false);
+  }
   assert(errorCaught, 'Bot caught and isolated the plugin error without unhandled exception');
 
   // Verify that the bot is STILL alive and responds to subsequent commands!

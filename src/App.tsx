@@ -32,8 +32,15 @@ import {
   Carrot,
   Flag,
   Coffee,
-  Info
+  Info,
+  Music,
+  ListMusic,
+  Volume2,
+  Disc
 } from 'lucide-react';
+import { SpotifyPlayerCard } from './components/SpotifyPlayerCard';
+import { FloatingSongPickerModal } from './components/FloatingSongPickerModal';
+import { MusicCardPayload, InteractiveListPayload } from './whatsapp/types';
 
 interface PluginInfo {
   name: string;
@@ -69,6 +76,10 @@ interface ChatMessage {
   buttons?: Array<{ id: string; text: string }>;
   footer?: string;
   imageUrl?: string;
+  audioUrl?: string;
+  audioMimetype?: string;
+  musicCard?: MusicCardPayload;
+  interactiveList?: InteractiveListPayload;
   timestamp: number;
   direction: 'inbound' | 'outbound';
 }
@@ -87,6 +98,7 @@ export default function App() {
   const [pairingLoading, setPairingLoading] = useState(false);
   const [pairingError, setPairingError] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [floatingPickerData, setFloatingPickerData] = useState<InteractiveListPayload | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   const fetchData = async () => {
@@ -160,7 +172,11 @@ export default function App() {
     setTimeout(() => setCopiedCode(false), 2000);
   };
 
-  const sendMessage = async (textToSend?: string) => {
+  const sendMessage = async (
+    textToSend?: string,
+    isControllerAction = false,
+    displayText?: string
+  ) => {
     const text = textToSend || inputText;
     if (!text.trim()) return;
 
@@ -172,11 +188,19 @@ export default function App() {
           text: text.trim(),
           senderJid: selectedTrainer,
           pushName: trainerName,
+          isControllerAction,
+          displayText,
         }),
       });
       const data = await res.json();
       if (data.success && data.history) {
         setChatMessages(data.history);
+
+        // If the latest message has an interactiveList, auto open the floating picker
+        const latestMsg = data.history[data.history.length - 1];
+        if (latestMsg?.interactiveList) {
+          setFloatingPickerData(latestMsg.interactiveList);
+        }
       }
       if (!textToSend) setInputText('');
     } catch (err: any) {
@@ -484,7 +508,7 @@ export default function App() {
                     }`}
                   >
                     {/* Outbound WhatsApp Forwarded Badge */}
-                    {msg.direction === 'outbound' && (
+                    {msg.direction === 'outbound' && !msg.musicCard && (
                       <div className="px-3.5 pt-2.5 pb-1 text-[11px] text-slate-400 flex items-center gap-1 border-b border-slate-700/50">
                         <Forward className="w-3.5 h-3.5 text-slate-400" />
                         <span className="font-semibold">Diteruskan</span>
@@ -492,8 +516,8 @@ export default function App() {
                       </div>
                     )}
 
-                    {/* Gambar Mascot Oguri Cap nempel ke teks caption */}
-                    {msg.direction === 'outbound' && (msg.imageUrl || true) && (
+                    {/* Gambar Mascot Oguri Cap nempel ke teks caption (sembunyikan jika pesan Spotify UI karena sudah punya thumbnail) */}
+                    {msg.direction === 'outbound' && !msg.musicCard && (msg.imageUrl || true) && (
                       <div className="relative">
                         <img
                           src={msg.imageUrl || '/assets/oguri_cap.jpg'}
@@ -507,16 +531,77 @@ export default function App() {
                     )}
 
                     {/* Message Body & Metadata */}
-                    <div className="p-3.5 space-y-1.5">
-                      <div className="text-[10px] font-mono text-slate-400 flex items-center justify-between gap-4">
-                        <span>{msg.direction === 'inbound' ? trainerName : 'Oguri Cap (Tracen)'}</span>
-                        <span>{new Date(msg.timestamp).toLocaleTimeString()}</span>
-                      </div>
+                    <div className="p-3.5 space-y-2">
+                      {!msg.musicCard && (
+                        <div className="text-[10px] font-mono text-slate-400 flex items-center justify-between gap-4">
+                          <span>{msg.direction === 'inbound' ? trainerName : 'Oguri Cap (Tracen)'}</span>
+                          <span>{new Date(msg.timestamp).toLocaleTimeString()}</span>
+                        </div>
+                      )}
+
+                      {/* Spotify-Like Player UI Card (Bukan Pesan Biasa, 1 Pesan 1 UI Penuh Tanpa Terganggu) */}
+                      {msg.musicCard && (
+                        <SpotifyPlayerCard
+                          card={msg.musicCard}
+                          onPlayFullAudio={(title) => {
+                            // Automatically switches to .play2 with title display
+                            sendMessage(`.play2 ${title}`, false, title);
+                          }}
+                        />
+                      )}
+
+                      {/* Standalone Audio Message Player (.play2) */}
+                      {msg.audioUrl && (
+                        <div className="p-3 bg-slate-950/80 border border-slate-700 rounded-xl space-y-2">
+                          <div className="flex items-center justify-between text-[11px] text-slate-300">
+                            <span className="flex items-center gap-1.5 font-medium text-amber-400">
+                              <Music className="w-3.5 h-3.5" />
+                              <span>Berkas MP3 Audio (.play2)</span>
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-mono">Durasi Penuh</span>
+                          </div>
+                          <audio controls className="w-full h-8 accent-amber-500" src={msg.audioUrl} />
+                        </div>
+                      )}
 
                       {/* Message Text Caption */}
-                      <div className="leading-relaxed whitespace-pre-wrap font-sans text-[12px]">{msg.text}</div>
+                      {!msg.musicCard && msg.text && (
+                        <div className="leading-relaxed whitespace-pre-wrap font-sans text-[12px]">{msg.text}</div>
+                      )}
 
-                      {msg.footer && (
+                      {/* Floating Song Picker Button */}
+                      {msg.interactiveList && (
+                        <div className="pt-2 border-t border-slate-700/50">
+                          <button
+                            onClick={() => setFloatingPickerData(msg.interactiveList!)}
+                            className="w-full py-2 px-3 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 active:from-amber-700 text-white rounded-xl text-xs font-semibold shadow-md flex items-center justify-center gap-2 transition cursor-pointer"
+                          >
+                            <ListMusic className="w-4 h-4" />
+                            <span>🎵 Buka Panel Pemilihan Lagu ({msg.interactiveList.items?.length || 0} Hasil)</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Interactive Buttons (Selection) */}
+                      {msg.buttons && msg.buttons.length > 0 && (
+                        <div className="pt-2 border-t border-slate-700/50 space-y-1.5">
+                          <div className="text-[10px] font-semibold text-slate-400">Pilihan Lagu:</div>
+                          <div className="flex flex-col gap-1.5">
+                            {msg.buttons.map((btn) => (
+                              <button
+                                key={btn.id}
+                                onClick={() => sendMessage(btn.id, false, btn.text)}
+                                className="py-1.5 px-2.5 bg-slate-700/80 hover:bg-slate-600 active:bg-slate-500 text-slate-100 rounded-lg text-[11px] font-medium transition cursor-pointer flex items-center justify-between text-left group"
+                              >
+                                <span className="truncate flex-1 group-hover:text-amber-300">{btn.text}</span>
+                                <Play className="w-3 h-3 text-amber-400 ml-2 shrink-0 fill-amber-400" />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {msg.footer && !msg.musicCard && (
                         <div className="text-[10px] text-slate-400 italic pt-1 border-t border-slate-700/40">
                           _{msg.footer}_
                         </div>
@@ -623,6 +708,24 @@ export default function App() {
                 <span>🏛️</span>
                 <span className="font-medium">.info</span>
               </button>
+
+              <button
+                onClick={() => sendMessage('.play Komang')}
+                className="py-1.5 px-2 bg-emerald-950/60 hover:bg-emerald-900/60 active:bg-emerald-800/60 rounded-lg text-emerald-200 flex items-center justify-center gap-1 transition cursor-pointer border border-emerald-700/50 text-xs"
+                title="Cari & Putar UI Spotify"
+              >
+                <span>🎵</span>
+                <span className="font-medium">.play</span>
+              </button>
+
+              <button
+                onClick={() => sendMessage('.play2 Komang')}
+                className="py-1.5 px-2 bg-teal-950/60 hover:bg-teal-900/60 active:bg-teal-800/60 rounded-lg text-teal-200 flex items-center justify-center gap-1 transition cursor-pointer border border-teal-700/50 text-xs"
+                title="Unduh MP3 Full Durasi"
+              >
+                <span>🎧</span>
+                <span className="font-medium">.play2</span>
+              </button>
             </div>
           </div>
 
@@ -638,7 +741,7 @@ export default function App() {
               type="text"
               value={inputText}
               onChange={(e) => setInputText(e.target.value)}
-              placeholder="Ketik pesan atau perintah (contoh: .menu, .makan bento, .race)..."
+              placeholder="Ketik pesan atau perintah (contoh: .play judul lagu, .play2, .menu)..."
               className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-amber-500 font-mono"
             />
             <button
@@ -651,6 +754,18 @@ export default function App() {
           </form>
         </div>
       </main>
+
+      {/* Floating Song Selection Modal */}
+      {floatingPickerData && (
+        <FloatingSongPickerModal
+          interactiveList={floatingPickerData}
+          onSelectSong={(cmdId, songTitle) => {
+            sendMessage(cmdId, false, songTitle);
+            setFloatingPickerData(null);
+          }}
+          onClose={() => setFloatingPickerData(null)}
+        />
+      )}
     </div>
   );
 }

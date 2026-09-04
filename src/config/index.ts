@@ -17,6 +17,7 @@ export interface BotConfig {
   nodeEnv: string;
   waEngine: 'baileys' | 'simulator';
   pairingNumber?: string;
+  neoxrApiKey?: string;
 }
 
 export const config: BotConfig = {
@@ -38,4 +39,5 @@ export const config: BotConfig = {
     if (num.startsWith('08')) num = '62' + num.slice(1);
     return num;
   })(),
+  neoxrApiKey: process.env.NEOXR_API_KEY || '',
 };

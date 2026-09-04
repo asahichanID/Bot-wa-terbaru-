@@ -41,6 +41,7 @@ export function sanitizeLogString(str: string): string {
 export class Logger {
   private scope: string;
   private currentLevel: LogLevel = LogLevel.INFO;
+  private static isSilent: boolean = false;
   private static logHistory: Array<{ timestamp: string; level: string; scope: string; message: string }> = [];
 
   constructor(scope: string) {
@@ -50,10 +51,32 @@ export class Logger {
     }
   }
 
+  static setSilent(silent: boolean): void {
+    Logger.isSilent = silent;
+  }
+
+  static isCurrentlySilent(): boolean {
+    return Logger.isSilent;
+  }
+
   private format(level: LogLevel, message: string, ...args: unknown[]): string {
     const time = new Date().toISOString().substring(11, 19);
     const levelStr = LEVEL_NAMES[level].padEnd(5);
-    const formattedArgs = args.length > 0 ? ' ' + args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ') : '';
+    const formattedArgs = args.length > 0
+      ? ' ' + args.map(a => {
+          if (a instanceof Error) {
+            return a.message || String(a);
+          }
+          if (typeof a === 'object' && a !== null) {
+            try {
+              return JSON.stringify(a);
+            } catch {
+              return String(a);
+            }
+          }
+          return String(a);
+        }).join(' ')
+      : '';
     const raw = `[${time}] [${levelStr}] [${this.scope}] ${message}${formattedArgs}`;
     const sanitized = sanitizeLogString(raw);
 
@@ -72,26 +95,30 @@ export class Logger {
   }
 
   debug(message: string, ...args: unknown[]): void {
-    if (this.currentLevel <= LogLevel.DEBUG) {
-      console.debug('\x1b[90m' + this.format(LogLevel.DEBUG, message, ...args) + '\x1b[0m');
+    const formatted = this.format(LogLevel.DEBUG, message, ...args);
+    if (!Logger.isSilent && this.currentLevel <= LogLevel.DEBUG) {
+      console.debug('\x1b[90m' + formatted + '\x1b[0m');
     }
   }
 
   info(message: string, ...args: unknown[]): void {
-    if (this.currentLevel <= LogLevel.INFO) {
-      console.log('\x1b[36m' + this.format(LogLevel.INFO, message, ...args) + '\x1b[0m');
+    const formatted = this.format(LogLevel.INFO, message, ...args);
+    if (!Logger.isSilent && this.currentLevel <= LogLevel.INFO) {
+      console.log('\x1b[36m' + formatted + '\x1b[0m');
     }
   }
 
   warn(message: string, ...args: unknown[]): void {
-    if (this.currentLevel <= LogLevel.WARN) {
-      console.warn('\x1b[33m' + this.format(LogLevel.WARN, message, ...args) + '\x1b[0m');
+    const formatted = this.format(LogLevel.WARN, message, ...args);
+    if (!Logger.isSilent && this.currentLevel <= LogLevel.WARN) {
+      console.warn('\x1b[33m' + formatted + '\x1b[0m');
     }
   }
 
   error(message: string, ...args: unknown[]): void {
-    if (this.currentLevel <= LogLevel.ERROR) {
-      console.error('\x1b[31m' + this.format(LogLevel.ERROR, message, ...args) + '\x1b[0m');
+    const formatted = this.format(LogLevel.ERROR, message, ...args);
+    if (!Logger.isSilent && this.currentLevel <= LogLevel.ERROR) {
+      console.error('\x1b[31m' + formatted + '\x1b[0m');
     }
   }
 

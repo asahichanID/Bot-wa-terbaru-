@@ -1,6 +1,6 @@
 {
   "name": "Modular WhatsApp Bot",
-  "description": "Production-ready modular WhatsApp bot themed after Uma Musume featuring Oguri Cap with interactive race simulations, training, dining, and Baileys engine.",
+  "description": "Production-ready modular WhatsApp bot themed after Uma Musume featuring Oguri Cap with interactive race simulations, training, dining, Spotify UI music playback (.play), and full MP3 download (.play2).",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

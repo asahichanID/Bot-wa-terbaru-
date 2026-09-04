@@ -1,5 +1,5 @@
 import { IWhatsAppEngine } from './IWhatsAppEngine';
-import { InboundMessage, OutboundContent, ConnectionStatus, ConnectionState } from './types';
+import { InboundMessage, OutboundContent, ConnectionStatus, ConnectionState, MusicCardPayload, InteractiveListPayload } from './types';
 import { Logger } from '../utils/logger';
 
 const logger = new Logger('SimulatorEngine');
@@ -12,6 +12,10 @@ export interface SimulatedChatLog {
   buttons?: Array<{ id: string; text: string }>;
   footer?: string;
   imageUrl?: string;
+  audioUrl?: string;
+  audioMimetype?: string;
+  musicCard?: MusicCardPayload;
+  interactiveList?: InteractiveListPayload;
   timestamp: number;
   direction: 'inbound' | 'outbound';
 }
@@ -67,6 +71,10 @@ export class SimulatorEngine implements IWhatsAppEngine {
       buttons: content.buttons,
       footer: content.footer,
       imageUrl: content.imageUrl || (content.showMascot ? '/assets/oguri_cap.jpg' : undefined),
+      audioUrl: content.audioUrl,
+      audioMimetype: content.audioMimetype,
+      musicCard: content.musicCard,
+      interactiveList: content.interactiveList,
       timestamp: Date.now(),
       direction: 'outbound',
     };
@@ -81,7 +89,13 @@ export class SimulatorEngine implements IWhatsAppEngine {
   /**
    * Helper to simulate a user sending a message to the bot
    */
-  async simulateInboundMessage(from: string, text: string, pushName = 'Player', isControllerAction = false): Promise<void> {
+  async simulateInboundMessage(
+    from: string,
+    text: string,
+    pushName = 'Player',
+    isControllerAction = false,
+    displayText?: string
+  ): Promise<void> {
     const id = `in-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
     if (!isControllerAction) {
@@ -89,7 +103,7 @@ export class SimulatorEngine implements IWhatsAppEngine {
         id,
         from,
         to: 'bot@s.whatsapp.net',
-        text,
+        text: displayText || text,
         timestamp: Date.now(),
         direction: 'inbound',
       };

@@ -19,6 +19,41 @@ export interface ButtonOption {
   text: string;
 }
 
+export interface MusicCardPayload {
+  title: string;
+  channel: string;
+  duration: string;
+  durationSeconds?: number;
+  thumbnail: string;
+  audioUrl: string;
+  videoId?: string;
+  middleStartSeconds?: number;
+  isSnippetOnly?: boolean;
+  fullDuration?: string;
+  botName?: string;
+  quote?: string;
+  views?: string;
+  size?: string;
+  mode?: 'play' | 'play2';
+}
+
+export interface InteractiveListItem {
+  id: string;
+  title: string;
+  description: string;
+  thumbnail?: string;
+  duration?: string;
+  author?: string;
+  url: string;
+  mode?: 'play' | 'play2';
+}
+
+export interface InteractiveListPayload {
+  title: string;
+  buttonText: string;
+  items: InteractiveListItem[];
+}
+
 export interface OutboundContent {
   text: string;
   footer?: string;
@@ -29,6 +64,10 @@ export interface OutboundContent {
   imageUrl?: string; // Image path or URL to attach image with text caption
   imageBuffer?: Buffer; // Raw image buffer
   showMascot?: boolean; // When true, attaches the Oguri Cap mascot image with text caption
+  audioUrl?: string;
+  audioMimetype?: string;
+  musicCard?: MusicCardPayload;
+  interactiveList?: InteractiveListPayload;
 }
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'open' | 'reconnecting' | 'closed';

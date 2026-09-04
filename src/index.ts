@@ -3,6 +3,7 @@ import { PingPlugin } from './plugins/ping';
 import { InfoPlugin } from './plugins/info';
 import { UpdatePlugin } from './plugins/update';
 import { UmamusumePlugin } from './plugins/umamusume';
+import { MusicPlugin } from './plugins/music';
 import { Logger } from './utils/logger';
 import { setupConsoleInput } from './utils/consoleInput';
 
@@ -22,6 +23,7 @@ async function bootstrap() {
   bot.pluginLoader.registerPlugin(new PingPlugin());
   bot.pluginLoader.registerPlugin(new InfoPlugin());
   bot.pluginLoader.registerPlugin(new UpdatePlugin());
+  bot.pluginLoader.registerPlugin(new MusicPlugin());
 
   logger.info(`Loaded ${bot.pluginLoader.getPluginCount()} plugins and ${bot.pluginLoader.getCommandCount()} commands.`);
 

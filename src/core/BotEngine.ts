@@ -131,7 +131,18 @@ export class BotEngine {
       }
     }
 
-    const matched = this.pluginLoader.getCommand(trigger);
+    let matched = this.pluginLoader.getCommand(trigger);
+
+    // Fallback: If message is a pure number (1-30) without prefix, route to .yt command (music selection)
+    if (!matched && /^[1-9]\d*$/.test(text)) {
+      const ytCmd = this.pluginLoader.getCommand('yt');
+      if (ytCmd) {
+        matched = ytCmd;
+        trigger = 'yt';
+        rawArgs = text;
+      }
+    }
+
     if (!matched) {
       logger.debug(`[BotEngine] Perintah "${trigger}" tidak dikenali.`);
       return;
@@ -188,7 +199,6 @@ export class BotEngine {
       this.eventBus.emit('command:after', command.name, ctx);
       logger.info(`✅ [Selesai] Perintah .${command.name} berhasil dijalankan untuk ${msg.sender}`);
     } catch (err) {
-      logger.error(`❌ [Error] Gagal mengeksekusi .${command.name}:`, err);
       await this.errorHandler.handlePluginError(plugin.manifest.name, err, ctx);
     }
   }

@@ -8,6 +8,7 @@ import { PingPlugin } from './src/plugins/ping';
 import { InfoPlugin } from './src/plugins/info';
 import { UpdatePlugin } from './src/plugins/update';
 import { UmamusumePlugin } from './src/plugins/umamusume';
+import { MusicPlugin } from './src/plugins/music';
 import { SimulatorEngine } from './src/whatsapp/SimulatorEngine';
 import { BaileysEngine } from './src/whatsapp/BaileysEngine';
 import { Logger } from './src/utils/logger';
@@ -90,6 +91,7 @@ async function initBot() {
   botInstance.pluginLoader.registerPlugin(new PingPlugin());
   botInstance.pluginLoader.registerPlugin(new InfoPlugin());
   botInstance.pluginLoader.registerPlugin(new UpdatePlugin());
+  botInstance.pluginLoader.registerPlugin(new MusicPlugin());
 
   await botInstance.start();
   logger.info('Oguri Cap bot booted successfully inside server!');
@@ -119,6 +121,42 @@ async function startServer() {
   // API Routes
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', time: Date.now() });
+  });
+
+  // Audio Streaming Proxy & CDN for WhatsApp Baileys and Web Player
+  app.get('/api/audio/stream', async (req, res) => {
+    const targetUrl = req.query.url as string;
+    const localAudioPath = path.join(process.cwd(), 'assets', 'audio', 'tracen_preview.mp3');
+
+    if (targetUrl && (targetUrl.startsWith('http://') || targetUrl.startsWith('https://'))) {
+      try {
+        const audioFetch = await fetch(targetUrl, {
+          headers: { 'User-Agent': 'WhatsApp/2.24.6.77 A' },
+          signal: AbortSignal.timeout(6000),
+        });
+        const contentType = audioFetch.headers.get('content-type') || '';
+        if (audioFetch.ok && (contentType.includes('audio') || contentType.includes('octet-stream'))) {
+          res.setHeader('Content-Type', contentType.includes('audio') ? contentType : 'audio/mpeg');
+          res.setHeader('Accept-Ranges', 'bytes');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          const arrayBuf = await audioFetch.arrayBuffer();
+          res.send(Buffer.from(arrayBuf));
+          return;
+        }
+      } catch (err: any) {
+        logger.warn(`Audio proxy failed (${err.message}), falling back to local audio.`);
+      }
+    }
+
+    if (fs.existsSync(localAudioPath)) {
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      const stream = fs.createReadStream(localAudioPath);
+      stream.pipe(res);
+    } else {
+      res.redirect('https://raw.githubusercontent.com/rafaelreis-hotmart/Audio-Sample-files/master/sample.mp3');
+    }
   });
 
   app.get('/api/status', async (req, res) => {
@@ -174,7 +212,7 @@ async function startServer() {
   });
 
   app.post('/api/chat/send', async (req, res) => {
-    const { text, senderJid, pushName, isControllerAction } = req.body;
+    const { text, senderJid, pushName, isControllerAction, displayText } = req.body;
     if (!text) {
       res.status(400).json({ error: 'Text message is required' });
       return;
@@ -187,7 +225,7 @@ async function startServer() {
       const name = pushName || 'WebTester';
 
       if (engine instanceof SimulatorEngine) {
-        await engine.simulateInboundMessage(jid, text, name, !!isControllerAction);
+        await engine.simulateInboundMessage(jid, text, name, !!isControllerAction, displayText);
         res.json({
           success: true,
           lastResponse: engine.getLastOutboundMessage(),
