@@ -500,18 +500,29 @@ export default function App() {
                       {/* Message Content */}
                       <div className="leading-relaxed font-mono text-[12px]">{msg.text}</div>
 
-                      {/* Interactive Buttons (if sent with the message) */}
+                      {/* Interactive WhatsApp Buttons (rendered exactly as on WhatsApp Native Flow) */}
                       {msg.buttons && msg.buttons.length > 0 && (
-                        <div className="mt-3 pt-3 border-t border-slate-700/60 grid grid-cols-4 gap-1.5 font-sans">
-                          {msg.buttons.map((btn) => (
-                            <button
-                              key={btn.id}
-                              onClick={() => sendMessage(btn.id, btn.id.startsWith('.tetris'))}
-                              className="px-2 py-1.5 bg-slate-700 hover:bg-slate-600 active:bg-slate-500 text-slate-100 rounded text-[11px] font-medium transition cursor-pointer text-center"
-                            >
-                              {btn.text}
-                            </button>
-                          ))}
+                        <div className="mt-3 pt-2.5 border-t border-slate-700/60 grid grid-cols-4 gap-1.5 font-sans">
+                          {msg.buttons.map((btn) => {
+                            const isDrop = btn.text === 'JATUHKAN';
+                            const isHalf = btn.text === 'Jeda' || btn.text === 'Lanjut' || btn.text === 'Main ulang';
+                            const colClass = isDrop
+                              ? 'col-span-4 py-2 font-bold text-[13px] tracking-wider bg-emerald-700 hover:bg-emerald-600 text-white shadow-sm border-emerald-600/60'
+                              : isHalf
+                              ? 'col-span-2 py-2 text-[12px] font-medium bg-slate-700 hover:bg-slate-600 text-slate-100 border-slate-600/50'
+                              : 'col-span-1 py-2 text-base font-bold bg-slate-700 hover:bg-slate-600 text-slate-100 border-slate-600/50';
+
+                            return (
+                              <button
+                                key={btn.id}
+                                id={`btn-native-${btn.id.replace(/[^a-zA-Z0-9]/g, '-')}`}
+                                onClick={() => sendMessage(btn.id, true)}
+                                className={`rounded-lg border shadow-sm flex items-center justify-center transition active:scale-[0.98] cursor-pointer ${colClass}`}
+                              >
+                                {btn.text}
+                              </button>
+                            );
+                          })}
                         </div>
                       )}
                     </div>

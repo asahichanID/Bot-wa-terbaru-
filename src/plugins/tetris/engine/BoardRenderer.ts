@@ -108,58 +108,49 @@ export class BoardRenderer {
     } else if (animation?.type === 'line_clear') {
       statusHeader = '✨ *LINE CLEAR!* ✨';
     } else if (animation?.type === 'falling') {
-      statusHeader = '⚡ *BALOK MELUNCUR...*';
+      statusHeader = '⚡ *BALOK JATUH...*';
     } else if (game.status === 'paused') {
-      statusHeader = '⏸️ *TETRIS (PAUSED)*';
+      statusHeader = '⏸️ *TETRIS (DIJEDA)*';
     } else if (game.status === 'game_over') {
       statusHeader = '💥 *GAME OVER!*';
     }
 
-    // Format Top 5 Leaderboard
-    let lbText = '🏆 *TOP 5 LEADERBOARD:*\n';
+    // Format Top 5 Leaderboard - exactly as shown in the video
+    let lbText = '*PAPAN PERINGKAT*\n';
     if (topLeaderboard.length === 0) {
-      lbText += '   _Belum ada skor tercatat. Jadilah yang pertama!_\n';
+      lbText += '🥇  Belum ada rekor tercatat. Jadilah juara!';
     } else {
-      const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
-      for (let i = 0; i < topLeaderboard.length; i++) {
+      const medals = ['🥇', '🥈', '🥉', '4.', '5.'];
+      for (let i = 0; i < Math.min(topLeaderboard.length, 5); i++) {
         const entry = topLeaderboard[i];
-        const medal = medals[i] || '▫️';
-        lbText += `${medal} *${entry.maskedName}* — \`${entry.score.toLocaleString()}\` pts (Lv.${entry.level})\n`;
+        const medal = medals[i] || `${i + 1}.`;
+        const scoreStr = entry.score.toLocaleString();
+        lbText += `${medal}  ${entry.maskedName}  ${scoreStr}\n`;
       }
     }
 
-    const pbScore = personalBest ?? (game.score);
-    lbText += `⭐ *Skor Terbaikmu:* \`${pbScore.toLocaleString()}\` pts\n`;
-
-    // Interactive button definitions: STRICTLY NON-EMOJI for premium WhatsApp UI
+    // Interactive button definitions: EXACTLY MATCHING THE VIDEO
+    // Row 1: ←, 🔄, →, ↓
+    // Row 2: JATUHKAN
+    // Row 3: Jeda, Main ulang
     const buttons: ButtonOption[] = [
-      { id: '.tetris left', text: 'Kiri' },
-      { id: '.tetris rotate', text: 'Putar' },
-      { id: '.tetris right', text: 'Kanan' },
-      { id: '.tetris drop', text: 'Turun' },
-      { id: '.tetris hard', text: 'Hard Drop' },
-      { id: '.tetris hold', text: 'Hold' },
+      { id: '.tetris left', text: '←' },
+      { id: '.tetris rotate', text: '🔄' },
+      { id: '.tetris right', text: '→' },
+      { id: '.tetris drop', text: '↓' },
+      { id: '.tetris hard', text: 'JATUHKAN' },
       { id: '.tetris pause', text: game.status === 'paused' ? 'Lanjut' : 'Jeda' },
-      { id: '.tetris restart', text: 'Mulai Ulang' },
+      { id: '.tetris restart', text: 'Main ulang' },
     ];
-
-    const controlsGuide =
-      `*Tombol Kontrol:*\n` +
-      `[ Kiri ] \`.kiri\`   |  [ Putar ] \`.putar\`  |  [ Kanan ] \`.kanan\`\n` +
-      `[ Turun ] \`.turun\` |  [ Hard ] \`.hard\`    |  [ Hold ] \`.hold\`\n` +
-      `[ Jeda ] \`.jeda\`   |  [ Ulang ] \`.ulang\``;
 
     const fullText =
       `${statusHeader}\n` +
       `👤 *Pemain:* ${game.playerName}\n` +
       `━━━━━━━━━━━━━━━━━━━━\n` +
-      `🎯 *Score:* \`${game.score.toLocaleString()}\`${comboText}\n` +
-      `📊 *Level:* \`${game.level}\`  |  🧱 *Lines:* \`${game.lines}\`\n` +
+      `🎯 *Score:* \`${game.score.toLocaleString()}\`${comboText} | 🧱 *Lines:* \`${game.lines}\` | 📊 *Lv.${game.level}*\n` +
       `🔮 *Next:* ${nextEmoji} (${game.nextPiece})  |  📦 *Hold:* ${holdEmoji}\n` +
       `━━━━━━━━━━━━━━━━━━━━\n` +
       `${boardLines}\n` +
-      `━━━━━━━━━━━━━━━━━━━━\n` +
-      `${controlsGuide}\n` +
       `━━━━━━━━━━━━━━━━━━━━\n` +
       `${lbText}`;
 

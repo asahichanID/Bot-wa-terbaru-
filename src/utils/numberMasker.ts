@@ -7,18 +7,14 @@ export function maskPhoneNumber(jidOrNumber: string): string {
   
   // Extract digits from JID or raw number
   const clean = jidOrNumber.replace(/@.*$/, '').replace(/[^0-9]/g, '');
-  if (clean.length <= 4) {
+  if (clean.length <= 6) {
     return clean;
   }
   
-  if (clean.length <= 8) {
-    return clean.slice(0, 2) + '****' + clean.slice(-2);
-  }
-  
-  // Keep first 5 and last 3-4 digits, mask the middle
-  const prefix = clean.slice(0, 5);
+  // Format as shown in video: 6289***290
+  const prefix = clean.slice(0, 4);
   const suffix = clean.slice(-3);
-  return `${prefix}****${suffix}`;
+  return `${prefix}***${suffix}`;
 }
 
 export function cleanJid(jid: string): string {

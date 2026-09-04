@@ -15,7 +15,7 @@ export interface TetrisConfig {
 
 export const defaultTetrisConfig: TetrisConfig = {
   boardWidth: 10,
-  boardHeight: 18, // 18 is compact and renders cleanly without truncation on mobile WhatsApp screen!
+  boardHeight: 14, // 14 rows fits perfectly on mobile WhatsApp screens without scrolling
   linesPerLevel: 10,
   basePoints: {
     single: 100,

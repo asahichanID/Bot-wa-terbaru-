@@ -46,12 +46,19 @@ export class TetrisPlugin extends PluginBase {
       { name: 'hold', action: 'hold' },
       { name: 'jeda', action: 'pause' },
       { name: 'ulang', action: 'restart' },
-      // Direct symbol shortcuts
+      // Direct button symbols & text from the video
+      { name: '←', action: 'left' },
       { name: '⬅️', action: 'left' },
-      { name: '➡️', action: 'right' },
       { name: '🔄', action: 'rotate' },
+      { name: '→', action: 'right' },
+      { name: '➡️', action: 'right' },
+      { name: '↓', action: 'drop' },
       { name: '⬇️', action: 'drop' },
+      { name: 'jatuhkan', action: 'hard' },
       { name: '⚡', action: 'hard' },
+      { name: 'main ulang', action: 'restart' },
+      { name: 'mainulang', action: 'restart' },
+      { name: 'lanjut', action: 'pause' },
       { name: '📦', action: 'hold' },
       { name: '⏸️', action: 'pause' },
     ];
@@ -98,21 +105,21 @@ export class TetrisPlugin extends PluginBase {
     const forceNew = sub === 'new';
 
     // Process movements / game actions
-    if (['left', 'l', 'kiri'].includes(sub)) {
+    if (['left', 'l', 'kiri', '←', '⬅️'].includes(sub)) {
       await this.executeGameAction(ctx, 'left');
-    } else if (['right', 'r', 'kanan'].includes(sub)) {
+    } else if (['right', 'r', 'kanan', '→', '➡️'].includes(sub)) {
       await this.executeGameAction(ctx, 'right');
-    } else if (['rotate', 'rot', 'putar', 'spin'].includes(sub)) {
+    } else if (['rotate', 'rot', 'putar', 'spin', '🔄'].includes(sub)) {
       await this.executeGameAction(ctx, 'rotate');
-    } else if (['drop', 'd', 'down', 'turun'].includes(sub)) {
+    } else if (['drop', 'd', 'down', 'turun', '↓', '⬇️'].includes(sub)) {
       await this.executeGameAction(ctx, 'drop');
-    } else if (['hard', 'h', 'harddrop', 'jatuh'].includes(sub)) {
+    } else if (['hard', 'h', 'harddrop', 'jatuh', 'jatuhkan', '⚡'].includes(sub)) {
       await this.executeGameAction(ctx, 'hard');
-    } else if (['hold', 'simpan', 'swap'].includes(sub)) {
+    } else if (['hold', 'simpan', 'swap', '📦'].includes(sub)) {
       await this.executeGameAction(ctx, 'hold');
-    } else if (['pause', 'p', 'jeda', 'resume'].includes(sub)) {
+    } else if (['pause', 'p', 'jeda', 'resume', 'lanjut', '⏸️'].includes(sub)) {
       await this.executeGameAction(ctx, 'pause');
-    } else if (['restart', 'reset', 'ulang'].includes(sub)) {
+    } else if (['restart', 'reset', 'ulang', 'mainulang', 'main ulang'].includes(sub)) {
       await this.executeGameAction(ctx, 'restart');
     } else {
       // Default: Start game or render current board (attached in 1 single message)

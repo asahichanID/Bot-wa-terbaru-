@@ -110,8 +110,25 @@ export class BotEngine {
         rawArgs = withoutPrefix.slice(firstSpace + 1).trim();
       }
     } else {
-      // Check if message is a button response or single emoji controller like ⬅️ ➡️ 🔄 ⬇️ ⚡ 📦 ⏸️
-      trigger = text.toLowerCase();
+      // Check if message is a button response or single emoji controller
+      const lower = text.toLowerCase();
+      if (this.pluginLoader.getCommand(lower)) {
+        trigger = lower;
+        rawArgs = '';
+      } else {
+        const firstSpace = lower.indexOf(' ');
+        if (firstSpace !== -1) {
+          const potentialCmd = lower.slice(0, firstSpace).trim();
+          if (this.pluginLoader.getCommand(potentialCmd)) {
+            trigger = potentialCmd;
+            rawArgs = text.slice(firstSpace + 1).trim();
+          } else {
+            trigger = lower;
+          }
+        } else {
+          trigger = lower;
+        }
+      }
     }
 
     const matched = this.pluginLoader.getCommand(trigger);

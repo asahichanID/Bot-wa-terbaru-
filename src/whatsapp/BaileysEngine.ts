@@ -11,6 +11,7 @@ const logger = new Logger('BaileysEngine');
 export class BaileysEngine implements IWhatsAppEngine {
   readonly engineName = 'Baileys Multi-Device (Node 20)';
   private socket: any = null;
+  private baileysModule: any = null;
   private messageHandlers: Array<(msg: InboundMessage) => Promise<void>> = [];
   private connectionHandlers: Array<(status: ConnectionStatus) => void> = [];
   private state: ConnectionState = 'disconnected';
@@ -50,6 +51,7 @@ export class BaileysEngine implements IWhatsAppEngine {
     try {
       // Dynamic import to support ESM / CJS cleanly
       const baileys = await import('@whiskeysockets/baileys');
+      this.baileysModule = baileys;
       const makeWASocket = baileys.default || baileys.makeWASocket;
       const { useMultiFileAuthState, DisconnectReason, Browsers } = baileys;
 
@@ -205,9 +207,10 @@ export class BaileysEngine implements IWhatsAppEngine {
     const actions = [
       'kiri', 'kanan', 'putar', 'turun', 'hard', 'hold', 'jeda', 'ulang',
       'left', 'right', 'rotate', 'rot', 'drop', 'stop', 'quit',
-      '⬅️', '➡️', '🔄', '⬇️', '⚡', '📦', '⏸️'
+      '⬅️', '➡️', '🔄', '⬇️', '⚡', '📦', '⏸️',
+      '←', '→', '↓', 'jatuhkan', 'main ulang', 'mainulang', 'lanjut'
     ];
-    return actions.includes(clean);
+    return actions.includes(clean) || clean.startsWith('.tetris');
   }
 
   private parseInboundMessage(msg: any): InboundMessage | null {
@@ -263,13 +266,19 @@ export class BaileysEngine implements IWhatsAppEngine {
     } else if (m.templateButtonReplyMessage?.selectedId) {
       text = m.templateButtonReplyMessage.selectedId;
       type = 'button_response';
-    } else if (m.interactiveResponseMessage?.nativeFlowResponseMessage?.paramsJson) {
-      try {
-        const params = JSON.parse(m.interactiveResponseMessage.nativeFlowResponseMessage.paramsJson);
-        text = params.id || params.text || '';
-        type = 'interactive';
-      } catch {
-        text = '';
+    } else if (m.interactiveResponseMessage) {
+      type = 'interactive';
+      const nf = m.interactiveResponseMessage.nativeFlowResponseMessage;
+      if (nf?.paramsJson) {
+        try {
+          const params = JSON.parse(nf.paramsJson);
+          text = params.id || params.display_text || params.text || '';
+        } catch {
+          text = nf.paramsJson;
+        }
+      }
+      if (!text && m.interactiveResponseMessage.body?.text) {
+        text = m.interactiveResponseMessage.body.text;
       }
     } else if (m.listResponseMessage?.singleSelectReply?.selectedRowId) {
       text = m.listResponseMessage.singleSelectReply.selectedRowId;
@@ -339,16 +348,7 @@ export class BaileysEngine implements IWhatsAppEngine {
 
     const cleanTo = to.replace(/:\d+@/, '@');
 
-    // Build payload with interactive button fallback
     let messageText = content.text;
-    if (content.buttons && content.buttons.length > 0 && !messageText.includes('Tombol Kontrol:')) {
-      // Append clear text buttons for clients that don't render native buttons
-      const buttonHints = content.buttons
-        .map((b, idx) => `[${idx + 1}] ${b.text}`)
-        .join('  ');
-      messageText += `\n\n*Aksi:*\n${buttonHints}`;
-    }
-
     if (content.footer) {
       messageText += `\n\n_${content.footer}_`;
     }
@@ -362,11 +362,98 @@ export class BaileysEngine implements IWhatsAppEngine {
           id: content.editId,
         };
         logger.info(`🔄 [Baileys] Edit pesan game in-place (ID: ${content.editId}) ke ${cleanTo}`);
+
+        // If interactive buttons are present, try updating with interactive message protocol
+        if (content.buttons && content.buttons.length > 0 && this.baileysModule?.generateWAMessageFromContent) {
+          try {
+            const nativeButtons = content.buttons.map(btn => ({
+              name: 'quick_reply',
+              buttonParamsJson: JSON.stringify({
+                display_text: btn.text,
+                id: btn.id
+              })
+            }));
+
+            const editWaMsg = this.baileysModule.generateWAMessageFromContent(cleanTo, {
+              protocolMessage: {
+                key: editKey,
+                type: 14, // MESSAGE_EDIT
+                editedMessage: {
+                  conversation: messageText,
+                  viewOnceMessage: {
+                    message: {
+                      interactiveMessage: {
+                        body: { text: messageText },
+                        footer: { text: content.footer || 'Denia Tetris' },
+                        nativeFlowMessage: { buttons: nativeButtons }
+                      }
+                    }
+                  }
+                }
+              }
+            }, { userJid: this.socket.user?.id || cleanTo });
+
+            await this.socket.relayMessage(cleanTo, editWaMsg.message, {
+              messageId: editWaMsg.key.id
+            });
+            return { id: content.editId };
+          } catch (editErr) {
+            logger.debug(`Relay edit interactive fallback to standard edit: ${editErr}`);
+          }
+        }
+
         const sent = await this.socket.sendMessage(cleanTo, {
           text: messageText,
           edit: editKey,
         });
         return { id: sent?.key?.id || content.editId };
+      }
+
+      // Native interactive buttons (Quick Reply buttons exactly as in video)
+      if (content.buttons && content.buttons.length > 0 && this.baileysModule?.generateWAMessageFromContent) {
+        try {
+          const nativeButtons = content.buttons.map(btn => ({
+            name: 'quick_reply',
+            buttonParamsJson: JSON.stringify({
+              display_text: btn.text,
+              id: btn.id
+            })
+          }));
+
+          const interactivePayload = {
+            viewOnceMessage: {
+              message: {
+                messageContextInfo: {
+                  deviceListMetadata: {},
+                  deviceListMetadataVersion: 2
+                },
+                interactiveMessage: {
+                  body: {
+                    text: messageText
+                  },
+                  footer: {
+                    text: content.footer || 'Denia Tetris'
+                  },
+                  nativeFlowMessage: {
+                    buttons: nativeButtons
+                  }
+                }
+              }
+            }
+          };
+
+          const waMsg = this.baileysModule.generateWAMessageFromContent(cleanTo, interactivePayload, {
+            userJid: this.socket.user?.id || cleanTo
+          });
+
+          logger.info(`📤 [Baileys] Mengirim interactive native message (${nativeButtons.length} tombol) ke ${cleanTo}`);
+          await this.socket.relayMessage(cleanTo, waMsg.message, {
+            messageId: waMsg.key.id
+          });
+          return { id: waMsg.key.id };
+        } catch (intErr: any) {
+          logger.warn(`Failed to send interactive message, falling back to text: ${intErr?.message || intErr}`);
+        }
       }
 
       logger.info(`📤 [Baileys] Mengirim balasan ke ${cleanTo}`);
