@@ -3,18 +3,11 @@ import esbuild from 'esbuild';
 import fs from 'fs';
 import path from 'path';
 
-console.log('📦 [Build] 1/3 Menjalankan Vite build untuk frontend...');
-try {
-  execSync('npx vite build', { stdio: 'inherit' });
-} catch (e) {
-  console.warn('⚠️ Vite build warning, melanjutkan bundle server...');
-}
-
 if (!fs.existsSync('dist')) {
   fs.mkdirSync('dist', { recursive: true });
 }
 
-console.log('⚙️ [Build] 2/3 Mengompilasi engine bot (src/index.ts)...');
+console.log('⚙️ [Build] 1/3 Mengompilasi engine bot WhatsApp (src/index.ts)...');
 try {
   esbuild.buildSync({
     entryPoints: ['src/index.ts'],
@@ -30,7 +23,7 @@ try {
   console.error('❌ Gagal compile src/index.ts:', e);
 }
 
-console.log('🚀 [Build] 3/3 Mengompilasi server utama (server.ts)...');
+console.log('🚀 [Build] 2/3 Mengompilasi server utama (server.ts)...');
 try {
   esbuild.buildSync({
     entryPoints: ['server.ts'],
@@ -47,4 +40,13 @@ try {
   process.exit(1);
 }
 
+console.log('📦 [Build] 3/3 Membangun asset web dashboard...');
+try {
+  execSync('npx vite build', { stdio: 'inherit' });
+  console.log('✅ Web dashboard siap!');
+} catch (e) {
+  console.warn('⚠️ Web dashboard build skipped/warning (bot WhatsApp tetap aktif 100%).');
+}
+
 console.log('✨ [Build] Selesai! Semua file siap dijalankan di Pterodactyl.');
+

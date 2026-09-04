@@ -13,6 +13,8 @@ import { BaileysEngine } from './src/whatsapp/BaileysEngine';
 import { Logger } from './src/utils/logger';
 import { runAllTests } from './src/tests/bot.test';
 
+import { setupConsoleInput } from './src/utils/consoleInput';
+
 const logger = new Logger('Server');
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
@@ -51,99 +53,6 @@ async function initBot() {
   await botInstance.start();
   logger.info('Bot booted successfully inside server!');
   return botInstance;
-}
-
-// Interactive terminal/console listener for Pterodactyl Console
-function setupConsoleInput(getBot: () => Promise<BotEngine>) {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    terminal: false,
-  });
-
-  rl.on('line', async (line) => {
-    const text = line.trim();
-    if (!text) return;
-
-    // Check if input is a phone number to request pairing code
-    const phoneMatch = text.match(/^(?:pair\s+)?(08\d{7,13}|62\d{8,13}|\+\d{9,15}|\d{9,15})$/i);
-    if (phoneMatch) {
-      let rawNumber = phoneMatch[1].replace(/[^0-9]/g, '');
-      if (rawNumber.startsWith('08')) {
-        rawNumber = '62' + rawNumber.slice(1);
-      }
-      logger.info(`[Console] Memproses permintaan pairing code untuk: ${rawNumber}...`);
-      try {
-        const bot = await getBot();
-        let engine = bot.wa.getEngine();
-        if (!(engine instanceof BaileysEngine)) {
-          logger.info('[Console] Mengaktifkan Baileys Engine untuk koneksi WhatsApp...');
-          currentEngineMode = 'baileys';
-          engine = new BaileysEngine();
-          await bot.wa.switchEngine(engine);
-        }
-        await (engine as BaileysEngine).requestPairingCode(rawNumber);
-      } catch (err: any) {
-        logger.error(`[Console] Gagal meminta pairing code untuk ${rawNumber}:`, err.message || err);
-      }
-      return;
-    }
-
-    if (text.toLowerCase() === 'reset' || text.toLowerCase() === 'logout') {
-      logger.info('─────────────────────────────────────────────────────────────');
-      logger.info('🔄 [Console] Mereset sesi WhatsApp (menghapus folder sesi lama)...');
-      try {
-        const bot = await getBot();
-        const engine = bot.wa.getEngine();
-        if (engine instanceof BaileysEngine) {
-          await engine.disconnect();
-          engine.clearSession();
-          logger.info('✅ [Console] Folder sesi berhasil dibersihkan!');
-          logger.info('🚀 [Console] Membuka koneksi baru... Ketik nomor HP Anda untuk meminta pairing code.');
-          await engine.connect();
-        }
-      } catch (e: any) {
-        logger.error('[Console] Gagal mereset sesi:', e.message || e);
-      }
-      logger.info('─────────────────────────────────────────────────────────────');
-      return;
-    }
-
-    if (text.toLowerCase() === 'reconnect') {
-      logger.info('[Console] Mencoba menghubungkan ulang ke WhatsApp...');
-      try {
-        const bot = await getBot();
-        const engine = bot.wa.getEngine();
-        if (engine instanceof BaileysEngine) {
-          await engine.connect();
-        }
-      } catch (e: any) {
-        logger.error('[Console] Gagal menghubungkan ulang:', e.message || e);
-      }
-      return;
-    }
-
-    if (text.toLowerCase() === 'status') {
-      try {
-        const bot = await getBot();
-        const st = bot.wa.getStatus();
-        logger.info(`[Status] Engine: ${st.engineName} | Koneksi: ${st.state} | JID: ${st.userJid || 'Belum terhubung'}`);
-      } catch (e: any) {
-        logger.error('Gagal mengambil status:', e.message);
-      }
-      return;
-    }
-
-    if (text.toLowerCase() === 'help') {
-      logger.info('──────────────── Perintah Konsol Pterodactyl ────────────────');
-      logger.info('• Ketik nomor HP (misal: 628123456789) -> Meminta Pairing Code WA');
-      logger.info('• status -> Menampilkan status koneksi WhatsApp');
-      logger.info('• reset / logout -> Hapus sesi lama & mulai sesi pairing baru');
-      logger.info('• reconnect -> Hubungkan ulang socket');
-      logger.info('─────────────────────────────────────────────────────────────');
-      return;
-    }
-  });
 }
 
 async function startServer() {

@@ -242,7 +242,11 @@ async function runAllTests() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+const isTestDirectRun =
+  (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) ||
+  (process.argv[1] && process.argv[1].includes('bot.test'));
+
+if (isTestDirectRun) {
   runAllTests().catch((err) => {
     console.error('Test runner fatal error:', err);
     process.exit(1);

@@ -32,5 +32,10 @@ export const config: BotConfig = {
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'production',
   waEngine: (process.env.WA_ENGINE as 'baileys' | 'simulator') || 'baileys',
-  pairingNumber: process.env.PAIRING_NUMBER?.replace(/[^0-9]/g, '') || undefined,
+  pairingNumber: (() => {
+    let num = process.env.PAIRING_NUMBER?.replace(/[^0-9]/g, '');
+    if (!num) return undefined;
+    if (num.startsWith('08')) num = '62' + num.slice(1);
+    return num;
+  })(),
 };

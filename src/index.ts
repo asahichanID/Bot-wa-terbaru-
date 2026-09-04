@@ -4,6 +4,7 @@ import { InfoPlugin } from './plugins/info';
 import { UpdatePlugin } from './plugins/update';
 import { TetrisPlugin } from './plugins/tetris';
 import { Logger } from './utils/logger';
+import { setupConsoleInput } from './utils/consoleInput';
 
 const logger = new Logger('App');
 
@@ -35,11 +36,19 @@ async function bootstrap() {
 
   // Start the bot
   await bot.start();
+
+  // Attach interactive console command prompt for Pterodactyl console
+  setupConsoleInput(() => bot);
+
   return bot;
 }
 
-// Auto-run when executed directly
-if (import.meta.url === `file://${process.argv[1]}` || !process.env.TEST_MODE) {
+// Auto-run when executed directly or when not in test mode
+const isDirectRun =
+  (typeof require !== 'undefined' && typeof module !== 'undefined' && require.main === module) ||
+  !process.env.TEST_MODE;
+
+if (isDirectRun) {
   bootstrap().catch((err) => {
     logger.error('Fatal initialization error:', err);
     process.exit(1);
