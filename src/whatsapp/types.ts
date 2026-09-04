@@ -24,8 +24,11 @@ export interface OutboundContent {
   footer?: string;
   buttons?: ButtonOption[];
   quotedId?: string;
-  editId?: string; // If editing an existing message (like Tetris board updates)
+  editId?: string; // If editing an existing message
   mentions?: string[];
+  imageUrl?: string; // Image path or URL to attach image with text caption
+  imageBuffer?: Buffer; // Raw image buffer
+  showMascot?: boolean; // When true, attaches the Oguri Cap mascot image with text caption
 }
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'open' | 'reconnecting' | 'closed';

@@ -7,7 +7,7 @@ import { BotEngine } from './src/core/BotEngine';
 import { PingPlugin } from './src/plugins/ping';
 import { InfoPlugin } from './src/plugins/info';
 import { UpdatePlugin } from './src/plugins/update';
-import { TetrisPlugin } from './src/plugins/tetris';
+import { UmamusumePlugin } from './src/plugins/umamusume';
 import { SimulatorEngine } from './src/whatsapp/SimulatorEngine';
 import { BaileysEngine } from './src/whatsapp/BaileysEngine';
 import { Logger } from './src/utils/logger';
@@ -18,6 +18,8 @@ import { setupConsoleInput } from './src/utils/consoleInput';
 const logger = new Logger('Server');
 const PORT = parseInt(process.env.PORT || '3000', 10);
 
+import fs from 'fs';
+
 // Detect environment: Pterodactyl, container, or production
 const isPterodactyl = !!(
   process.env.P_SERVER_UUID ||
@@ -27,11 +29,50 @@ const isPterodactyl = !!(
   process.env.NODE_ENV === 'production'
 );
 
-// Determine initial engine mode: If user explicitly specified WA_ENGINE, respect it.
-// In Pterodactyl or production or when PAIRING_NUMBER is given, default to 'baileys'.
+// Determine initial engine mode: Default to 'baileys' for real WhatsApp connection
 let currentEngineMode: 'baileys' | 'simulator' =
-  (process.env.WA_ENGINE as 'baileys' | 'simulator') ||
-  (isPterodactyl || process.env.PAIRING_NUMBER ? 'baileys' : 'simulator');
+  process.env.WA_ENGINE === 'simulator' ? 'simulator' : 'baileys';
+
+// Singleton Process Lock: Ensures only ONE bot instance ever runs on this machine/session
+function acquireSingleInstanceLock(): boolean {
+  const lockFile = path.join(process.cwd(), 'data', 'bot.pid');
+  try {
+    const dataDir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    if (fs.existsSync(lockFile)) {
+      const pidStr = fs.readFileSync(lockFile, 'utf8').trim();
+      const existingPid = parseInt(pidStr, 10);
+      if (existingPid && existingPid !== process.pid) {
+        try {
+          // Check if the other process is actively running
+          process.kill(existingPid, 0);
+          logger.warn(`⚠️ Instance bot lain telah aktif berjalan (PID: ${existingPid}). Menutup proses ini agar tidak terjadi bentrok sesi enkripsi WhatsApp (MessageCounterError).`);
+          return false;
+        } catch {
+          // Process does not exist (stale lock file), safe to proceed
+        }
+      }
+    }
+    fs.writeFileSync(lockFile, String(process.pid), 'utf8');
+
+    const cleanLock = () => {
+      try {
+        if (fs.existsSync(lockFile) && fs.readFileSync(lockFile, 'utf8').trim() === String(process.pid)) {
+          fs.unlinkSync(lockFile);
+        }
+      } catch {}
+    };
+
+    process.on('exit', cleanLock);
+    process.on('SIGINT', () => { cleanLock(); process.exit(0); });
+    process.on('SIGTERM', () => { cleanLock(); process.exit(0); });
+    return true;
+  } catch {
+    return true;
+  }
+}
 
 // Shared Bot Instance
 let botInstance: BotEngine | null = null;
@@ -39,25 +80,35 @@ let botInstance: BotEngine | null = null;
 async function initBot() {
   if (botInstance) return botInstance;
 
-  logger.info(`Booting Modular WhatsApp Bot (Engine: ${currentEngineMode})...`);
+  logger.info(`Booting Oguri Cap Bot Engine (Engine: ${currentEngineMode})...`);
   botInstance = new BotEngine({
     waEngine: currentEngineMode,
-    botName: process.env.BOT_NAME || 'ModularWABot',
+    botName: process.env.BOT_NAME || 'Oguri Cap',
   });
 
+  botInstance.pluginLoader.registerPlugin(new UmamusumePlugin());
   botInstance.pluginLoader.registerPlugin(new PingPlugin());
   botInstance.pluginLoader.registerPlugin(new InfoPlugin());
   botInstance.pluginLoader.registerPlugin(new UpdatePlugin());
-  botInstance.pluginLoader.registerPlugin(new TetrisPlugin());
 
   await botInstance.start();
-  logger.info('Bot booted successfully inside server!');
+  logger.info('Oguri Cap bot booted successfully inside server!');
   return botInstance;
 }
 
 async function startServer() {
+  if (!acquireSingleInstanceLock()) {
+    logger.warn('🚫 Instance bot lain terdeteksi aktif. Proses duplikat dibatalkan.');
+    process.exit(0);
+    return;
+  }
+
   const app = express();
   app.use(express.json());
+
+  // Serve static mascot assets
+  app.use('/assets', express.static(path.join(process.cwd(), 'assets')));
+  app.use('/assets', express.static(path.join(process.cwd(), 'public', 'assets')));
 
   // Initialize bot in background
   const botPromise = initBot();
@@ -81,17 +132,16 @@ async function startServer() {
         commandCount: p.getCommands().length,
       }));
 
-      const tetrisPlugin = bot.pluginLoader.getAllPlugins().find(p => p.manifest.name === 'tetris') as TetrisPlugin;
-      const activeGames = tetrisPlugin ? tetrisPlugin.getManager().getActiveGameCount() : 0;
-
       res.json({
         botName: bot.config.botName,
+        mascot: 'Oguri Cap (オグリキャップ)',
+        theme: 'Uma Musume Pretty Derby',
+        mascotImage: '/assets/oguri_cap.jpg',
         uptime: bot.getUptimeSeconds(),
         engineMode: currentEngineMode,
         waStatus,
         plugins,
         commandCount: bot.pluginLoader.getCommandCount(),
-        activeTetrisGames: activeGames,
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -210,23 +260,43 @@ async function startServer() {
     }
   });
 
-  // Vite integration for dev & prod
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
+  // Static web dashboard or Vite integration
+  const distPath = path.join(process.cwd(), 'dist');
+  const hasDistHtml = fs.existsSync(path.join(distPath, 'index.html'));
+
+  if (hasDistHtml || process.env.NODE_ENV === 'production' || isPterodactyl) {
+    if (hasDistHtml) {
+      app.use(express.static(distPath));
+      app.get('*', (req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+    }
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+    try {
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } catch (viteErr: any) {
+      logger.warn('Vite dev middleware skipped:', viteErr.message || viteErr);
+    }
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     logger.info(`Server & Web Dashboard running on http://0.0.0.0:${PORT}`);
+  });
+
+  server.on('error', async (e: any) => {
+    if (e.code === 'EADDRINUSE') {
+      logger.warn(`⚠️ Port ${PORT} sedang digunakan oleh proses lain. Menghentikan instance duplikat untuk mencegah tabrakan sesi enkripsi WhatsApp.`);
+      if (botInstance) {
+        await botInstance.stop().catch(() => {});
+      }
+      process.exit(0);
+    } else {
+      logger.error('HTTP Server error:', e.message || e);
+    }
   });
 }
 

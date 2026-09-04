@@ -11,6 +11,7 @@ export interface SimulatedChatLog {
   text: string;
   buttons?: Array<{ id: string; text: string }>;
   footer?: string;
+  imageUrl?: string;
   timestamp: number;
   direction: 'inbound' | 'outbound';
 }
@@ -65,6 +66,7 @@ export class SimulatorEngine implements IWhatsAppEngine {
       text: content.text,
       buttons: content.buttons,
       footer: content.footer,
+      imageUrl: content.imageUrl || (content.showMascot ? '/assets/oguri_cap.jpg' : undefined),
       timestamp: Date.now(),
       direction: 'outbound',
     };

@@ -1,6 +1,6 @@
 {
   "name": "Modular WhatsApp Bot",
-  "description": "Production-ready modular WhatsApp bot with clean architecture, plugin system, Baileys WA engine, and interactive Tetris.",
+  "description": "Production-ready modular WhatsApp bot themed after Uma Musume featuring Oguri Cap with interactive race simulations, training, dining, and Baileys engine.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

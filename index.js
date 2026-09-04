@@ -1,7 +1,6 @@
-// Primary universal entry point for Pterodactyl hosting panels executing 'node index.js'
+// Primary universal entry point for Pterodactyl hosting panels executing 'node index.js' or 'npm start'
 import 'dotenv/config';
 import fs from 'fs';
-import { execSync } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
@@ -10,25 +9,40 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const require = createRequire(import.meta.url);
 
+process.env.NODE_ENV = process.env.NODE_ENV || 'production';
+process.env.WA_ENGINE = process.env.WA_ENGINE || 'baileys';
+
+console.log('═══════════════════════════════════════════════════════════');
+console.log('🤖 MODULAR WHATSAPP BOT - MEMULAI BOT...');
+console.log('═══════════════════════════════════════════════════════════');
+
 const targetDist = path.join(__dirname, 'dist', 'server.cjs');
 
 if (!fs.existsSync(targetDist)) {
-  console.log('⚡ [Pterodactyl] dist/server.cjs belum ter-compile. Menjalankan build otomatis...');
+  console.log('⚡ [Pterodactyl] Mengompilasi engine bot via esbuild (hanya 0.1 detik)...');
   try {
-    execSync('node scripts/build.js', { stdio: 'inherit' });
-    console.log('✅ [Pterodactyl] Build selesai!');
-  } catch (e) {
-    console.error('❌ Gagal melakukan build otomatis:', e);
-    // Fallback directly to tsx if available
-    try {
-      console.log('🔄 Mencoba menjalankan langsung via tsx...');
-      execSync('npx tsx server.ts', { stdio: 'inherit' });
-      process.exit(0);
-    } catch {
-      process.exit(1);
+    const esbuild = (await import('esbuild')).default;
+    if (!fs.existsSync(path.join(__dirname, 'dist'))) {
+      fs.mkdirSync(path.join(__dirname, 'dist'), { recursive: true });
     }
+    esbuild.buildSync({
+      entryPoints: [path.join(__dirname, 'server.ts')],
+      outfile: targetDist,
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      packages: 'external',
+      sourcemap: false,
+    });
+    console.log('✅ [Pterodactyl] Kompilasi berhasil!');
+  } catch (e) {
+    console.warn('⚠️ Kompilasi esbuild dilewati, menjalankan via tsx...');
   }
 }
 
-// Start compiled server & bot
-require('./dist/server.cjs');
+if (fs.existsSync(targetDist)) {
+  require(targetDist);
+} else {
+  console.log('🚀 Menjalankan langsung via tsx...');
+  import('./server.ts');
+}

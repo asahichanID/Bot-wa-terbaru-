@@ -3,12 +3,33 @@
     "6281234567890@s.whatsapp.net": {
       "id": "6281234567890@s.whatsapp.net",
       "phoneNumber": "6281234567890",
-      "pushName": "Tester",
+      "pushName": "Player 1",
       "createdAt": 1788397047848,
-      "lastSeenAt": 1788397047848,
+      "lastSeenAt": 1788509395013,
+      "role": "user"
+    },
+    "144835205972010@lid": {
+      "id": "144835205972010@lid",
+      "phoneNumber": "144835205972010",
+      "pushName": "‎",
+      "createdAt": 1788511624711,
+      "lastSeenAt": 1788511655592,
       "role": "user"
     }
   },
-  "gameStats": {},
+  "gameStats": {
+    "tetris:6281234567890@s.whatsapp.net": {
+      "id": "tetris:6281234567890@s.whatsapp.net",
+      "userId": "6281234567890@s.whatsapp.net",
+      "gameType": "tetris",
+      "gamesPlayed": 1,
+      "highScore": 164,
+      "totalScore": 164,
+      "linesCleared": 0,
+      "maxLevel": 1,
+      "lastPlayedAt": 1788509091552,
+      "bestCombo": 0
+    }
+  },
   "settings": {}
 }

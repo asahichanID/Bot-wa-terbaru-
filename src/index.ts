@@ -2,7 +2,7 @@ import { BotEngine } from './core/BotEngine';
 import { PingPlugin } from './plugins/ping';
 import { InfoPlugin } from './plugins/info';
 import { UpdatePlugin } from './plugins/update';
-import { TetrisPlugin } from './plugins/tetris';
+import { UmamusumePlugin } from './plugins/umamusume';
 import { Logger } from './utils/logger';
 import { setupConsoleInput } from './utils/consoleInput';
 
@@ -10,18 +10,18 @@ const logger = new Logger('App');
 
 async function bootstrap() {
   logger.info('==========================================');
-  logger.info('   MODULAR WHATSAPP BOT (NODE 20)         ');
-  logger.info('   Pterodactyl & Container Ready          ');
+  logger.info('   🏇 OGURI CAP - UMA MUSUME BOT (NODE 20) ');
+  logger.info('   Tracen Academy & Kasamatsu Legend      ');
   logger.info('==========================================');
 
   // Initialize Core Bot Engine
   const bot = new BotEngine();
 
   // Register built-in plugins
+  bot.pluginLoader.registerPlugin(new UmamusumePlugin());
   bot.pluginLoader.registerPlugin(new PingPlugin());
   bot.pluginLoader.registerPlugin(new InfoPlugin());
   bot.pluginLoader.registerPlugin(new UpdatePlugin());
-  bot.pluginLoader.registerPlugin(new TetrisPlugin());
 
   logger.info(`Loaded ${bot.pluginLoader.getPluginCount()} plugins and ${bot.pluginLoader.getCommandCount()} commands.`);
 

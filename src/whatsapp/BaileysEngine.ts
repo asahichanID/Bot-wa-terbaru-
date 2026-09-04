@@ -22,6 +22,17 @@ export class BaileysEngine implements IWhatsAppEngine {
   private startTime = Date.now();
   private reconnectTimer: NodeJS.Timeout | null = null;
   private isIntentionallyClosed = false;
+  private messageStore = new Map<string, any>();
+  private msgRetryCounterCache: any = null;
+
+  private saveMessageToStore(id: string, message: any): void {
+    if (!id || !message) return;
+    if (this.messageStore.size > 2000) {
+      const firstKey = this.messageStore.keys().next().value;
+      if (firstKey) this.messageStore.delete(firstKey);
+    }
+    this.messageStore.set(id, message);
+  }
 
   async init(): Promise<void> {
     const sessionPath = path.resolve(config.sessionDir);
@@ -29,6 +40,24 @@ export class BaileysEngine implements IWhatsAppEngine {
       fs.mkdirSync(sessionPath, { recursive: true });
     }
     logger.info(`Initialized Baileys session storage at: ${sessionPath}`);
+
+    // Install global safety guard on libsignal's hardcoded console.error for duplicate/out-of-order counter packets
+    if (!(globalThis as any).__libsignal_console_error_patched) {
+      (globalThis as any).__libsignal_console_error_patched = true;
+      const originalConsoleError = console.error;
+      console.error = function (...args: any[]) {
+        const text = args.map(a => (typeof a === 'string' ? a : (a && a.message) || String(a))).join(' ');
+        if (
+          text.includes('Failed to decrypt message with any known session') ||
+          text.includes('Key used already or never filled') ||
+          text.includes('MessageCounterError')
+        ) {
+          logger.debug(`[Decryption Guard] Duplicate or replayed message counter handled safely: ${text.slice(0, 100)}`);
+          return;
+        }
+        originalConsoleError.apply(console, args);
+      };
+    }
   }
 
   clearSession(): void {
@@ -53,7 +82,7 @@ export class BaileysEngine implements IWhatsAppEngine {
       const baileys = await import('@whiskeysockets/baileys');
       this.baileysModule = baileys;
       const makeWASocket = baileys.default || baileys.makeWASocket;
-      const { useMultiFileAuthState, DisconnectReason, Browsers } = baileys;
+      const { useMultiFileAuthState, DisconnectReason, Browsers, makeCacheableSignalKeyStore } = baileys;
 
       const { state, saveCreds } = await useMultiFileAuthState(config.sessionDir);
 
@@ -61,13 +90,46 @@ export class BaileysEngine implements IWhatsAppEngine {
       const pino = (await import('pino')).default;
       const silentLogger = pino({ level: 'silent' });
 
+      // Signal Key Store with cache and mutex to prevent key desync and MessageCounterError
+      const cachedKeys = makeCacheableSignalKeyStore ? makeCacheableSignalKeyStore(state.keys, silentLogger) : state.keys;
+
+      // Shared retry counter cache to track and prevent duplicate decryption attempts
+      if (!this.msgRetryCounterCache) {
+        try {
+          const NodeCacheModule: any = await import('@cacheable/node-cache');
+          const NodeCache = NodeCacheModule.default?.NodeCache || NodeCacheModule.NodeCache || NodeCacheModule.default;
+          this.msgRetryCounterCache = new NodeCache({ stdTTL: 3600, useClones: false });
+        } catch {
+          const map = new Map<string, number>();
+          this.msgRetryCounterCache = {
+            get: (k: string) => map.get(k),
+            set: (k: string, v: number) => map.set(k, v),
+            del: (k: string) => map.delete(k),
+            flushAll: () => map.clear(),
+          };
+        }
+      }
+
       this.socket = makeWASocket({
-        auth: state,
+        auth: {
+          creds: state.creds,
+          keys: cachedKeys,
+        },
         logger: silentLogger,
         printQRInTerminal: false,
         browser: Browsers.ubuntu('Chrome'),
         syncFullHistory: false,
         markOnlineOnConnect: true,
+        enableAutoSessionRecreation: true,
+        enableRecentMessageCache: true,
+        msgRetryCounterCache: this.msgRetryCounterCache,
+        shouldIgnoreJid: (jid: string) => jid === 'status@broadcast',
+        getMessage: async (key: any) => {
+          if (key && key.id && this.messageStore.has(key.id)) {
+            return this.messageStore.get(key.id);
+          }
+          return undefined;
+        },
       });
 
       this.socket.ev.on('creds.update', saveCreds);
@@ -165,6 +227,11 @@ export class BaileysEngine implements IWhatsAppEngine {
 
         for (const msg of upsert.messages) {
           if (!msg.message) continue;
+
+          // Cache message in store for retry requests and decryption repairs
+          if (msg.key?.id) {
+            this.saveMessageToStore(msg.key.id, msg.message);
+          }
 
           const from = msg.key.remoteJid || '';
           if (from === 'status@broadcast') continue;
@@ -347,15 +414,62 @@ export class BaileysEngine implements IWhatsAppEngine {
     }
 
     const cleanTo = to.replace(/:\d+@/, '@');
+    const isGroup = cleanTo.endsWith('@g.us');
 
     let messageText = content.text;
     if (content.footer) {
       messageText += `\n\n_${content.footer}_`;
     }
 
+    // Official Forwarded Newsletter Badge ("Pesan Diteruskan")
+    const forwardedContextInfo = {
+      mentionedJid: [cleanTo],
+      isForwarded: true,
+      forwardingScore: 999999,
+      forwardedNewsletterMessageInfo: {
+        newsletterJid: '120363144038483540@newsletter',
+        newsletterName: '🏃‍♀️ Uma Musume: Oguri Cap (オグリキャップ)',
+        serverMessageId: 100,
+      },
+    };
+
     try {
+      // 0. IMAGE + CAPTION MESSAGE (Oguri Cap mascot illustration attached directly to text)
+      if (content.imageUrl || content.imageBuffer || content.showMascot) {
+        try {
+          let imageSource: any;
+          if (content.imageBuffer) {
+            imageSource = content.imageBuffer;
+          } else if (content.imageUrl && (content.imageUrl.startsWith('http://') || content.imageUrl.startsWith('https://'))) {
+            imageSource = { url: content.imageUrl };
+          } else {
+            const localFile = content.imageUrl || path.join(process.cwd(), 'assets', 'oguri_cap.jpg');
+            if (fs.existsSync(localFile)) {
+              imageSource = fs.readFileSync(localFile);
+            } else {
+              imageSource = { url: 'https://raw.githubusercontent.com/asahichanID/media/refs/heads/main/images%20(6).jpeg' };
+            }
+          }
+
+          logger.info(`📤 [Baileys] Mengirim pesan bergambar Oguri Cap + Teks ke ${cleanTo}`);
+          const sent = await this.socket.sendMessage(cleanTo, {
+            image: imageSource,
+            caption: messageText,
+            contextInfo: forwardedContextInfo,
+          });
+
+          const sentId = sent?.key?.id || String(Date.now());
+          if (sentId && sent?.message) {
+            this.saveMessageToStore(sentId, sent.message);
+          }
+          return { id: sentId };
+        } catch (imgErr: any) {
+          logger.warn(`⚠️ Pengiriman gambar gagal, fallback ke pesan teks biasa: ${imgErr?.message || imgErr}`);
+        }
+      }
+
+      // 1. IN-PLACE EDIT (1 single message simulator gameplay without creating new messages)
       if (content.editId) {
-        // WhatsApp Baileys protocol message edit (in-place update)
         const editKey = {
           remoteJid: cleanTo,
           fromMe: true,
@@ -363,112 +477,142 @@ export class BaileysEngine implements IWhatsAppEngine {
         };
         logger.info(`🔄 [Baileys] Edit pesan game in-place (ID: ${content.editId}) ke ${cleanTo}`);
 
-        // If interactive buttons are present, try updating with interactive message protocol
-        if (content.buttons && content.buttons.length > 0 && this.baileysModule?.generateWAMessageFromContent) {
-          try {
-            const nativeButtons = content.buttons.map(btn => ({
-              name: 'quick_reply',
-              buttonParamsJson: JSON.stringify({
-                display_text: btn.text,
-                id: btn.id
-              })
-            }));
-
-            const editWaMsg = this.baileysModule.generateWAMessageFromContent(cleanTo, {
-              protocolMessage: {
-                key: editKey,
-                type: 14, // MESSAGE_EDIT
-                editedMessage: {
-                  conversation: messageText,
-                  viewOnceMessage: {
-                    message: {
-                      interactiveMessage: {
-                        body: { text: messageText },
-                        footer: { text: content.footer || 'Denia Tetris' },
-                        nativeFlowMessage: { buttons: nativeButtons }
-                      }
-                    }
-                  }
-                }
-              }
-            }, { userJid: this.socket.user?.id || cleanTo });
-
-            await this.socket.relayMessage(cleanTo, editWaMsg.message, {
-              messageId: editWaMsg.key.id
-            });
-            return { id: content.editId };
-          } catch (editErr) {
-            logger.debug(`Relay edit interactive fallback to standard edit: ${editErr}`);
+        try {
+          const sent = await this.socket.sendMessage(cleanTo, {
+            text: messageText,
+            edit: editKey,
+            contextInfo: forwardedContextInfo,
+          });
+          const sentId = sent?.key?.id || content.editId;
+          if (sentId && sent?.message) {
+            this.saveMessageToStore(sentId, sent.message);
           }
+          return { id: sentId };
+        } catch (editErr: any) {
+          logger.warn(`⚠️ Edit pesan in-place gagal (${editErr?.message || editErr}), mencoba kirim ulang...`);
         }
-
-        const sent = await this.socket.sendMessage(cleanTo, {
-          text: messageText,
-          edit: editKey,
-        });
-        return { id: sent?.key?.id || content.editId };
       }
 
-      // Native interactive buttons (Quick Reply buttons exactly as in video)
+      // 2. NATIVE INTERACTIVE BUTTONS WITH BINARY NODES & FORWARDED BADGE
       if (content.buttons && content.buttons.length > 0 && this.baileysModule?.generateWAMessageFromContent) {
         try {
-          const nativeButtons = content.buttons.map(btn => ({
+          const nativeButtons = content.buttons.map((btn) => ({
             name: 'quick_reply',
             buttonParamsJson: JSON.stringify({
               display_text: btn.text,
-              id: btn.id
-            })
+              id: btn.id,
+            }),
           }));
+
+          // WhatsApp binary nodes required for native flow quick_reply buttons
+          const additionalNodes: any[] = [
+            {
+              tag: 'biz',
+              attrs: {},
+              content: [
+                {
+                  tag: 'interactive',
+                  attrs: {
+                    type: 'native_flow',
+                    v: '1',
+                  },
+                  content: [
+                    {
+                      tag: 'native_flow',
+                      attrs: {
+                        name: 'quick_reply',
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ];
+
+          if (!isGroup) {
+            additionalNodes.push({
+              tag: 'bot',
+              attrs: {
+                biz_bot: '1',
+              },
+            });
+          }
 
           const interactivePayload = {
             viewOnceMessage: {
               message: {
                 messageContextInfo: {
                   deviceListMetadata: {},
-                  deviceListMetadataVersion: 2
+                  deviceListMetadataVersion: 2,
                 },
                 interactiveMessage: {
                   body: {
-                    text: messageText
+                    text: messageText,
                   },
                   footer: {
-                    text: content.footer || 'Denia Tetris'
+                    text: content.footer || '🎮 WhatsApp Tetris WebApp Simulator',
+                  },
+                  header: {
+                    title: '🎮 *TETRIS WHATSAPP SIMULATOR*',
+                    hasMediaAttachment: false,
                   },
                   nativeFlowMessage: {
-                    buttons: nativeButtons
-                  }
-                }
-              }
-            }
+                    buttons: nativeButtons,
+                    messageParamsJson: '',
+                  },
+                  contextInfo: forwardedContextInfo,
+                },
+              },
+            },
           };
 
           const waMsg = this.baileysModule.generateWAMessageFromContent(cleanTo, interactivePayload, {
-            userJid: this.socket.user?.id || cleanTo
+            userJid: this.socket.user?.id || cleanTo,
           });
 
-          logger.info(`📤 [Baileys] Mengirim interactive native message (${nativeButtons.length} tombol) ke ${cleanTo}`);
+          logger.info(`📤 [Baileys] Mengirim interactive native message (${nativeButtons.length} tombol) dengan badge diteruskan & binary nodes ke ${cleanTo}`);
+
           await this.socket.relayMessage(cleanTo, waMsg.message, {
-            messageId: waMsg.key.id
+            messageId: waMsg.key.id,
+            additionalNodes,
           });
+
+          if (waMsg?.key?.id && waMsg?.message) {
+            this.saveMessageToStore(waMsg.key.id, waMsg.message);
+          }
+
           return { id: waMsg.key.id };
         } catch (intErr: any) {
-          logger.warn(`Failed to send interactive message, falling back to text: ${intErr?.message || intErr}`);
+          logger.warn(`Interactive relayMessage gagal, fallback ke pesan standar: ${intErr?.message || intErr}`);
         }
       }
 
-      logger.info(`📤 [Baileys] Mengirim balasan ke ${cleanTo}`);
+      // 3. FALLBACK / REGULAR MESSAGE (with forwarded badge)
+      logger.info(`📤 [Baileys] Mengirim pesan standar ke ${cleanTo}`);
       const sent = await this.socket.sendMessage(cleanTo, {
         text: messageText,
+        contextInfo: forwardedContextInfo,
       });
-      return { id: sent?.key?.id || String(Date.now()) };
+      const finalId = sent?.key?.id || String(Date.now());
+      if (finalId && sent?.message) {
+        this.saveMessageToStore(finalId, sent.message);
+      }
+      return { id: finalId };
     } catch (err: any) {
       logger.error(`Failed to send message to ${cleanTo}:`, err?.message || err);
-      // Fallback: If editing fails (e.g. message too old or unsupported WhatsApp client), send new message
+      // Fallback: If editing fails, send new message
       if (content.editId) {
         try {
-          logger.info(`⚠️ Edit gagal, fallback mengirim pesan baru ke ${cleanTo}...`);
-          const fallback = await this.socket.sendMessage(cleanTo, { text: messageText });
-          return { id: fallback?.key?.id || String(Date.now()) };
+          logger.info(`⚠️ Fallback mengirim pesan baru ke ${cleanTo}...`);
+          const fallback = await this.socket.sendMessage(cleanTo, {
+            text: messageText,
+            contextInfo: forwardedContextInfo,
+          });
+          const fbId = fallback?.key?.id || String(Date.now());
+          if (fbId && fallback?.message) {
+            this.saveMessageToStore(fbId, fallback.message);
+          }
+          return { id: fbId };
         } catch {
           // ignore fallback error
         }

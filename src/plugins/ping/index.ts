@@ -41,14 +41,21 @@ export class PingPlugin extends PluginBase {
     const latency = Date.now() - start;
 
     const response =
-      `🏓 *PONG!*\n\n` +
-      `⚡ *Latency:* \`${latency} ms\`\n` +
-      `⏱️ *Uptime:* \`${uptime}\`\n` +
-      `🤖 *Bot Version:* \`v${botVersion}\`\n` +
-      `📦 *Node Version:* \`${nodeVersion}\`\n` +
-      `🌐 *WA Engine:* \`${ctx.wa.getStatus().engineName}\``;
+      `🏃‍♀️ *TRACEN SPRINT REPORT (PONG!)* 🏃‍♀️\n\n` +
+      `⏱️ *Lap Latency:* \`${latency} ms\`\n` +
+      `🏟️ *Race Venue:* \`Tokyo Racecourse (Turf 2400m)\`\n` +
+      `🌿 *Turf Condition:* \`Firm (良) - Optimal Racing State\`\n` +
+      `⏳ *Trainer Uptime:* \`${uptime}\`\n` +
+      `🐎 *Mascot:* \`Oguri Cap (オグリキャップ)\`\n` +
+      `📦 *Node Runtime:* \`${nodeVersion}\`\n` +
+      `🌐 *WA Engine:* \`${ctx.wa.getStatus().engineName}\`\n\n` +
+      `💬 _"Garis akhir sudah terlihat di depan mata, Trainer! Akselerasi puncak siap diluncurkan!"_`;
 
-    await ctx.reply(response);
+    await ctx.reply({
+      text: response,
+      footer: 'Tracen Academy Sprint Diagnostics',
+      showMascot: true,
+    });
   }
 }
 

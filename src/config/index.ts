@@ -20,7 +20,7 @@ export interface BotConfig {
 }
 
 export const config: BotConfig = {
-  botName: process.env.BOT_NAME || 'ModularWABot',
+  botName: process.env.BOT_NAME || 'Oguri Cap',
   prefix: process.env.BOT_PREFIX || '.',
   sessionDir: process.env.SESSION_DIR || path.resolve(process.cwd(), 'data', 'session'),
   databasePath: process.env.DATABASE_PATH || path.resolve(process.cwd(), 'data', 'database.json'),

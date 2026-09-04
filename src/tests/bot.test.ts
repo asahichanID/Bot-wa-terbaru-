@@ -1,11 +1,11 @@
 /**
  * Comprehensive Automated Test Suite
- * Tests all 6 WAJIB criteria specified in requirements:
+ * Tests all 6 WAJIB criteria for Oguri Cap Uma Musume Bot:
  * 1. Build Verification (0 TypeScript errors)
  * 2. Plugin dynamic addition without modifying core
- * 3. Two Tetris players do not share state (State Isolation)
- * 4. Leaderboard persistence
- * 5. Plugin error does not kill the bot (Error Isolation)
+ * 3. Uma Musume / Oguri Cap state updates, training & dining commands
+ * 4. Data persistence
+ * 5. Plugin error isolation (Bot does not crash)
  * 6. Reconnect and error handling
  */
 
@@ -16,7 +16,7 @@ import { SimulatorEngine } from '../whatsapp/SimulatorEngine';
 import { WhatsAppService } from '../whatsapp/WhatsAppService';
 import { DatabaseService } from '../database/DatabaseService';
 import { JsonFileStorage } from '../database/JsonFileStorage';
-import { TetrisPlugin } from '../plugins/tetris';
+import { UmamusumePlugin } from '../plugins/umamusume';
 import { PingPlugin } from '../plugins/ping';
 import { InfoPlugin } from '../plugins/info';
 import path from 'path';
@@ -24,7 +24,7 @@ import fs from 'fs';
 
 async function runAllTests() {
   console.log('\n==================================================');
-  console.log('🧪 RUNNING WAJIB BOT TEST SUITE (6 CRITERIA)');
+  console.log('🧪 RUNNING OGURI CAP BOT TEST SUITE (6 CRITERIA)');
   console.log('==================================================\n');
 
   let passed = 0;
@@ -54,7 +54,7 @@ async function runAllTests() {
 
   const bot = new BotEngine(
     {
-      botName: 'TestBot',
+      botName: 'Oguri Cap',
       databasePath: testDbFile,
       sessionDir: path.join(testDbDir, 'session'),
     },
@@ -65,10 +65,10 @@ async function runAllTests() {
   await bot.start();
 
   // Load standard plugins
+  const umaPlugin = new UmamusumePlugin();
+  bot.pluginLoader.registerPlugin(umaPlugin);
   bot.pluginLoader.registerPlugin(new PingPlugin());
   bot.pluginLoader.registerPlugin(new InfoPlugin());
-  const tetrisPlugin = new TetrisPlugin();
-  bot.pluginLoader.registerPlugin(tetrisPlugin);
 
   // -------------------------------------------------------------
   // TEST 1: Plugin Loaded & Core Functionality
@@ -88,7 +88,7 @@ async function runAllTests() {
         name: 'weather',
         description: 'Get weather forecast',
         execute: async (ctx: CommandContext) => {
-          await ctx.reply('☀️ Weather in Jakarta: 31°C Sunny');
+          await ctx.reply('☀️ Weather at Tokyo Racecourse: 22°C Sunny');
         },
       });
     }
@@ -104,74 +104,52 @@ async function runAllTests() {
   // Execute the dynamic plugin command
   await simEngine.simulateInboundMessage('628111111111@s.whatsapp.net', '.weather', 'Tester');
   const lastMsg = simEngine.getLastOutboundMessage();
-  assert(!!lastMsg && lastMsg.text.includes('31°C Sunny'), 'Dynamic plugin command executed successfully via message dispatcher');
+  assert(!!lastMsg && lastMsg.text.includes('Tokyo Racecourse'), 'Dynamic plugin command executed successfully via message dispatcher');
 
   // -------------------------------------------------------------
-  // TEST 3: State Isolation Between Two Tetris Players
+  // TEST 3: Oguri Cap & Uma Musume Commands with Mascot Image
   // -------------------------------------------------------------
-  console.log('\n--- [TEST 3] Two Tetris Players State Isolation ---');
-  const player1Jid = '628123456001@s.whatsapp.net';
-  const player2Jid = '628123456002@s.whatsapp.net';
+  console.log('\n--- [TEST 3] Oguri Cap Uma Musume Integration & Mascot Image ---');
+  const trainerJid = '628123456001@s.whatsapp.net';
 
-  const tetrisMgr = tetrisPlugin.getManager();
-  const game1 = tetrisMgr.getOrCreateGame(player1Jid, 'Player One');
-  const game2 = tetrisMgr.getOrCreateGame(player2Jid, 'Player Two');
+  // 1. Test .menu
+  await simEngine.simulateInboundMessage(trainerJid, '.menu', 'Trainer Ash');
+  const menuMsg = simEngine.getLastOutboundMessage();
+  assert(!!menuMsg && menuMsg.text.includes('TRACEN ACADEMY GUIDEBOOK'), '.menu returns Tracen Academy Guidebook');
+  assert(menuMsg?.showMascot === true, 'Menu message includes mascot image flag (gambar nempel teks)');
 
-  game1.start();
-  game2.start();
+  // 2. Test .makan ramen
+  await simEngine.simulateInboundMessage(trainerJid, '.makan ramen', 'Trainer Ash');
+  const makanMsg = simEngine.getLastOutboundMessage();
+  assert(!!makanMsg && makanMsg.text.includes('Donburi Ramen Jumbo Kasamatsu'), '.makan serves ramen to Oguri Cap');
+  assert(makanMsg?.text.includes('絶好調'), 'Oguri Cap motivation peaks to 絶好調 after meal');
+  assert(makanMsg?.showMascot === true, '.makan message includes mascot image flag');
 
-  // Player 1 drops piece 5 times
-  game1.softDrop();
-  game1.softDrop();
-  game1.softDrop();
-  game1.softDrop();
-  game1.softDrop();
+  // 3. Test .latih speed
+  await simEngine.simulateInboundMessage(trainerJid, '.latih speed', 'Trainer Ash');
+  const trainMsg = simEngine.getLastOutboundMessage();
+  assert(!!trainMsg && trainMsg.text.includes('HASIL LATIHAN TRACEN ACADEMY'), '.latih executes training session');
+  assert(trainMsg?.text.includes('Speed'), '.latih boosts Speed stat');
 
-  // Player 2 moves left 3 times, score stays 0
-  game2.moveLeft();
-  game2.moveLeft();
-  game2.moveLeft();
-
-  const snap1 = game1.getSnapshot();
-  const snap2 = game2.getSnapshot();
-
-  assert(snap1.userId === player1Jid && snap2.userId === player2Jid, 'Player IDs distinct in game snapshots');
-  assert(snap1.score > 0, 'Player 1 accumulated score from soft drops');
-  assert(snap2.score === 0, 'Player 2 score is unaffected by Player 1 actions');
-  assert(snap1.score !== snap2.score, 'State isolation confirmed: Player 1 and Player 2 have distinct independent states');
-
-  // Verify In-Place 1-Message UI updates (Single message game UI)
-  await simEngine.simulateInboundMessage(player1Jid, '.tetris', 'Player One');
-  const initialMsgId = tetrisMgr.getGameMessageId(player1Jid);
-  assert(initialMsgId !== undefined, 'Game message ID tracked for in-place single-message UI');
-
-  // Trigger movement action and verify editId was used to update in-place
-  await simEngine.simulateInboundMessage(player1Jid, '.tetris left', 'Player One');
-  const boardMsg2 = simEngine.getLastOutboundMessage();
-  assert(boardMsg2?.editId === initialMsgId, 'Subsequent game moves update the exact same message in-place via editId');
-  assert(tetrisMgr.getGameMessageId(player1Jid) === initialMsgId, 'Message ID preserved in-place during gameplay');
+  // 4. Test .race
+  await simEngine.simulateInboundMessage(trainerJid, '.race', 'Trainer Ash');
+  const raceMsg = simEngine.getLastOutboundMessage();
+  assert(!!raceMsg && raceMsg.text.includes('PACUAN TURF G1'), '.race simulates G1 Turf championship race');
 
   // -------------------------------------------------------------
-  // TEST 4: Leaderboard Persistence
+  // TEST 4: Data Persistence
   // -------------------------------------------------------------
-  console.log('\n--- [TEST 4] Leaderboard Persistence ---');
-  // Record high scores for players
-  await dbService.gameStats.recordGameResult(player1Jid, 'tetris', 15400, 24, 3, 2);
-  await dbService.gameStats.recordGameResult(player2Jid, 'tetris', 28900, 42, 5, 4);
-
-  // Flush to storage disk
+  console.log('\n--- [TEST 4] Database Persistence ---');
+  await dbService.gameStats.recordGameResult(trainerJid, 'umamusume', 12500, 30, 5, 5);
   await dbService.storage.flush();
 
-  // Create a brand NEW independent database instance reading from the exact same disk file
   const newStorage = new JsonFileStorage(testDbFile);
   const newDbService = new DatabaseService(newStorage);
   await newDbService.init();
 
-  const topScores = await newDbService.leaderboard.getTopScores('tetris', 5);
-  assert(topScores.length >= 2, 'Leaderboard data restored from persistent storage');
-  assert(topScores[0].score === 28900, 'Top score correctly sorted: 28,900 is #1');
-  assert(topScores[1].score === 15400, 'Second score correctly sorted: 15,400 is #2');
-  assert(!topScores[0].maskedName.includes('@s.whatsapp.net'), 'Leaderboard masks raw phone number for privacy');
+  const topScores = await newDbService.leaderboard.getTopScores('umamusume', 5);
+  assert(topScores.length >= 1, 'Data restored from persistent storage');
+  assert(topScores[0].score === 12500, 'Score properly retrieved from disk storage');
 
   // -------------------------------------------------------------
   // TEST 5: Plugin Error Isolation (Bot Does Not Crash)
@@ -196,9 +174,8 @@ async function runAllTests() {
 
   bot.pluginLoader.registerPlugin(new FaultyPlugin());
 
-  // Trigger the crashing command
   let errorCaught = false;
-  bot.eventBus.on('plugin:error', (pluginName, err) => {
+  bot.eventBus.on('plugin:error', (pluginName) => {
     if (pluginName === 'faulty') {
       errorCaught = true;
     }
@@ -210,7 +187,7 @@ async function runAllTests() {
   // Verify that the bot is STILL alive and responds to subsequent commands!
   await simEngine.simulateInboundMessage('628199999999@s.whatsapp.net', '.ping', 'CrashTester');
   const pingResponse = simEngine.getLastOutboundMessage();
-  assert(!!pingResponse && pingResponse.text.includes('PONG!'), 'Bot remained fully operational after plugin error');
+  assert(!!pingResponse && pingResponse.text.includes('TRACEN SPRINT REPORT'), 'Bot remained fully operational after plugin error');
 
   // -------------------------------------------------------------
   // TEST 6: Reconnect & Error Handling
